@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AusLaw AI - An Australian Legal Assistant MVP that validates "White Box" citation logic and "Lawyer Matching" workflow using Supabase and CopilotKit.
+AusLaw AI - An Australian Legal Assistant MVP with two planned branches:
+- **Research Branch**: RAG-based legal Q&A with citations (current)
+- **Action Branch**: Interactive checklists for legal procedures (planned)
 
 ## Architecture
 
@@ -26,16 +28,15 @@ CopilotSidebar      HttpAgent proxy      LangGraph Agent
 cd backend
 conda activate law_agent
 python main.py                    # Start server on localhost:8000
-python test_db.py                 # Test Supabase connection and data
 ```
 
 ### Frontend
 ```bash
 cd frontend
-npm install                       # Install dependencies
+npm install
 npm run dev                       # Start dev server on localhost:3000
-npm run build                     # Production build
-npm run lint                      # ESLint check
+npm run build
+npm run lint
 ```
 
 ### Database
@@ -50,25 +51,36 @@ SUPABASE_KEY=
 OPENAI_API_KEY=
 ```
 
-## Key Files
+## Backend Structure
 
-- `backend/main.py` - FastAPI app, LangGraph agent definition, Supabase tools
-- `frontend/app/api/copilotkit/route.ts` - Proxy endpoint connecting frontend to backend
-- `frontend/app/layout.tsx` - CopilotKit provider with agent configuration
-- `frontend/app/page.tsx` - Main UI with document viewer and chat sidebar
-- `database/setup.sql` - Database schema and mock data
+```
+backend/
+├── main.py                 # FastAPI app, LangGraph agent, CopilotKit integration
+├── app/
+│   ├── config.py           # Environment variables, logging setup
+│   ├── db/
+│   │   └── supabase_client.py   # Supabase connection singleton
+│   └── tools/
+│       ├── lookup_law.py   # Full-text search in legal_docs table
+│       └── find_lawyer.py  # Filter lawyers by location/specialty
+```
 
 ## Agent Configuration
 
-The LangGraph agent uses:
-- `MemorySaver` checkpointer for state management
-- System prompt enforcing tool usage and citation format
-- Two tools: `lookup_law` (full-text search) and `find_lawyer` (filter by location/specialty)
+The LangGraph agent in `main.py`:
+- Uses `create_react_agent` with `MemorySaver` checkpointer
+- System prompt enforces tool usage and citation format: `"According to [Act Name] [Section]..."`
+- Integrates with CopilotKit via `LangGraphAGUIAgent` at `/copilotkit` endpoint
+
+## Database Schema
+
+**legal_docs**: `id`, `content`, `metadata` (JSONB with source/section/url), `search_vector` (auto-generated tsvector)
+
+**lawyers**: `id`, `name`, `specialty`, `location`, `rate`
 
 ## Full-Text Search
 
-The `lookup_law` tool converts queries to PostgreSQL tsquery format using OR logic:
+The `lookup_law` tool converts queries to PostgreSQL tsquery with OR logic:
 ```
 "rent increase" → "rent | increase"
 ```
-This ensures broader matches in the MVP's limited dataset.
