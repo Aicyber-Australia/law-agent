@@ -3,12 +3,16 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import ChatOpenAI
-from langgraph.prebuilt import create_react_agent
+from langchain_core.messages import SystemMessage
+from langchain_core.runnables import RunnableConfig
+from langgraph.graph import StateGraph, END
+from langgraph.prebuilt import ToolNode
 from langgraph.checkpoint.memory import MemorySaver
-from copilotkit import LangGraphAGUIAgent
+from copilotkit import CopilotKitState, LangGraphAGUIAgent
 from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 
 from app.tools import lookup_law, find_lawyer
+from app.tools.generate_checklist import generate_checklist
 from app.config import logger
 
 app = FastAPI(
@@ -28,8 +32,10 @@ app.add_middleware(
 
 # Setup Agent Logic
 model = ChatOpenAI(model="gpt-4o", temperature=0)
+tools = [lookup_law, find_lawyer, generate_checklist]
+model_with_tools = model.bind_tools(tools)
 
-SYSTEM_PROMPT = """
+BASE_SYSTEM_PROMPT = """
 You are 'AusLaw AI', a transparent Australian legal assistant.
 
 CAPABILITIES:
@@ -37,34 +43,97 @@ CAPABILITIES:
 2. **Action**: Generate step-by-step checklists using `generate_checklist`
 3. **Match**: Find lawyers using `find_lawyer`
 
-IMPORTANT - STATE HANDLING:
-- Australian law varies by state (VIC, NSW, QLD, SA, WA, TAS, NT, ACT)
-- REMEMBER the user's state from conversation history. Once they tell you their state, use it for all subsequent queries.
-- Only ask for state if they haven't mentioned it anywhere in the conversation.
-- State mappings: "Victoria"/"Melbourne" = VIC, "Sydney"/"New South Wales" = NSW, "Brisbane"/"Queensland" = QLD
-- Pass the state parameter to lookup_law and generate_checklist tools
-
 RULES:
 1. For legal questions: Use `lookup_law(query, state)` to find legislation. DO NOT answer from memory.
 2. CITATIONS FORMAT: Always cite like this:
    "According to the **[Act Name] [Section]** ([State])..."
    Example: "According to the **Residential Tenancies Act 1997 s.44** (VIC)..."
 3. For "how to" questions: Use `generate_checklist(procedure, state)` tool.
-4. If user needs professional help: Use `find_lawyer` to suggest contacts.
+4. For lawyer requests: Use `find_lawyer(specialty, state)`.
 5. End responses with: "_This is general information, not legal advice. Please consult a qualified lawyer for your specific situation._"
 """
 
-# Import the new checklist tool
-from app.tools.generate_checklist import generate_checklist
 
-# Create the Graph with checkpointer for state management
+# Define state that inherits from CopilotKitState
+class AgentState(CopilotKitState):
+    pass
+
+
+def extract_user_state(state: AgentState) -> str | None:
+    """Extract user's Australian state from CopilotKit context."""
+    copilotkit_data = state.get("copilotkit", {})
+    context_items = copilotkit_data.get("context", [])
+
+    for item in context_items:
+        try:
+            description = item.description if hasattr(item, "description") else item.get("description", "")
+            value = item.value if hasattr(item, "value") else item.get("value", "")
+
+            if "state" in description.lower() or "territory" in description.lower():
+                return value
+        except Exception:
+            continue
+
+    return None
+
+
+def chat_node(state: AgentState, config: RunnableConfig):
+    """Main chat node that reads CopilotKit context."""
+    # Extract user state from CopilotKit context
+    user_state_context = extract_user_state(state)
+
+    # Build dynamic system message
+    if user_state_context:
+        state_instruction = f"""
+USER LOCATION CONTEXT:
+{user_state_context}
+
+CRITICAL: The user's state is provided above. You MUST use this state for ALL tool calls.
+- DO NOT ask for the user's state or location - you already have it!
+- Use the state code (VIC, NSW, QLD, SA, WA, TAS, NT, ACT) from the context above for all tools.
+"""
+    else:
+        state_instruction = """
+USER LOCATION: Not yet selected.
+Ask the user to select their Australian state/territory so you can provide accurate legal information.
+"""
+
+    system_message = SystemMessage(content=BASE_SYSTEM_PROMPT + state_instruction)
+
+    # Invoke model with context-aware system message
+    response = model_with_tools.invoke(
+        [system_message, *state["messages"]],
+        config
+    )
+
+    return {"messages": [response]}
+
+
+def should_continue(state: AgentState):
+    """Check if we should continue to tools or end."""
+    messages = state["messages"]
+    last_message = messages[-1]
+
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        return "tools"
+    return END
+
+
+# Build the graph
+workflow = StateGraph(AgentState)
+
+# Add nodes
+workflow.add_node("chat", chat_node)
+workflow.add_node("tools", ToolNode(tools))
+
+# Add edges
+workflow.set_entry_point("chat")
+workflow.add_conditional_edges("chat", should_continue, {"tools": "tools", END: END})
+workflow.add_edge("tools", "chat")
+
+# Compile with checkpointer
 checkpointer = MemorySaver()
-graph = create_react_agent(
-    model,
-    tools=[lookup_law, find_lawyer, generate_checklist],
-    prompt=SYSTEM_PROMPT,
-    checkpointer=checkpointer,
-)
+graph = workflow.compile(checkpointer=checkpointer)
 
 # Integrate with CopilotKit (using LangGraphAGUIAgent)
 add_langgraph_fastapi_endpoint(

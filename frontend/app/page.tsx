@@ -2,10 +2,19 @@
 
 import { useState } from "react";
 import { CopilotSidebar } from "@copilotkit/react-ui";
+import { useCopilotReadable } from "@copilotkit/react-core";
 import { StateSelector } from "./components/StateSelector";
 
 export default function Home() {
   const [userState, setUserState] = useState<string | null>(null);
+
+  // Share user's state/territory with the Copilot agent
+  useCopilotReadable({
+    description: "The user's Australian state/territory for legal queries",
+    value: userState
+      ? `User is in ${userState}. Use state="${userState}" for lookup_law, find_lawyer, and generate_checklist tools.`
+      : "User has not selected their state yet.",
+  });
 
   // Dynamic initial message based on selected state
   const getInitialMessage = () => {
@@ -66,7 +75,6 @@ export default function Home() {
       <div className="w-1/2 relative">
         <CopilotSidebar
           defaultOpen={true}
-          instructions={`You are AusLaw AI. The user is in ${userState || "unknown state"}. Remember this state for all queries.`}
           labels={{
             title: "AusLaw AI",
             initial: getInitialMessage(),
