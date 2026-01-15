@@ -4,9 +4,14 @@ import { useState } from "react";
 import { CopilotSidebar } from "@copilotkit/react-ui";
 import { useCopilotReadable } from "@copilotkit/react-core";
 import { StateSelector } from "./components/StateSelector";
+import { FileUpload } from "./components/FileUpload";
 
 export default function Home() {
   const [userState, setUserState] = useState<string | null>(null);
+  const [uploadedDocument, setUploadedDocument] = useState<{
+    content: string;
+    filename: string;
+  } | null>(null);
 
   // Share user's state/territory with the Copilot agent
   useCopilotReadable({
@@ -15,6 +20,22 @@ export default function Home() {
       ? `User is in ${userState}. Use state="${userState}" for lookup_law, find_lawyer, and generate_checklist tools.`
       : "User has not selected their state yet.",
   });
+
+  // Share uploaded document content with the Copilot agent
+  useCopilotReadable({
+    description: "Uploaded document content for analysis",
+    value: uploadedDocument
+      ? `The user has uploaded a document named "${uploadedDocument.filename}". Here is the document content:\n\n---DOCUMENT START---\n${uploadedDocument.content}\n---DOCUMENT END---\n\nUse the analyze_document tool to analyze this content. Automatically detect the document type (lease, contract, visa, or general) based on the content.`
+      : "No document uploaded yet.",
+  });
+
+  const handleFileContent = (content: string, filename: string) => {
+    setUploadedDocument({ content, filename });
+  };
+
+  const clearDocument = () => {
+    setUploadedDocument(null);
+  };
 
   // Dynamic initial message based on selected state
   const getInitialMessage = () => {
@@ -49,6 +70,28 @@ export default function Home() {
             </div>
           )}
 
+          {/* Document Upload */}
+          <div className="bg-white border border-slate-200 rounded-lg p-4">
+            <h3 className="font-medium text-slate-800 mb-3">Upload Document</h3>
+            <p className="text-slate-600 text-sm mb-3">
+              Upload a lease, contract, or legal document for analysis.
+            </p>
+            <FileUpload onFileContent={handleFileContent} />
+            {uploadedDocument && (
+              <div className="mt-3 p-2 bg-green-50 border border-green-200 rounded flex items-center justify-between">
+                <span className="text-green-700 text-sm truncate">
+                  {uploadedDocument.filename} ready for analysis
+                </span>
+                <button
+                  onClick={clearDocument}
+                  className="text-green-600 hover:text-green-800 text-sm ml-2"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+          </div>
+
           {/* Quick Actions */}
           <div className="bg-white border border-slate-200 rounded-lg p-4">
             <h3 className="font-medium text-slate-800 mb-3">Common Questions</h3>
@@ -79,6 +122,8 @@ export default function Home() {
             title: "AusLaw AI",
             initial: getInitialMessage(),
           }}
+          imageUploadsEnabled={true}
+          inputFileAccept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
         />
       </div>
     </div>

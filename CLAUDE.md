@@ -94,3 +94,60 @@ The `lookup_law` tool converts queries to PostgreSQL tsquery with OR logic:
 ```
 "rent increase" → "rent | increase"
 ```
+
+## Code Style
+
+- All comments and documentation must be in English
+- After completing code changes, generate a commit message summarizing the changes
+
+---
+
+## Planned Feature: Document Upload & Analysis
+
+Add capability to upload and analyze legal documents (leases, contracts, visa docs).
+
+### Why No Sub-graph Needed
+- Simple single tool flow: upload → parse → analyze
+- No complex multi-step state management
+- GPT-4o Vision handles images directly
+
+### Implementation Steps
+
+**1. Frontend - Enable file upload**
+```tsx
+// frontend/app/page.tsx
+<CopilotSidebar
+  imageUploadsEnabled={true}
+  inputFileAccept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+  ...
+/>
+```
+
+**2. Backend - Install dependencies**
+```bash
+pip install pypdf python-docx pillow
+```
+
+**3. Create document parser**
+```
+backend/app/utils/document_parser.py
+- parse_pdf(content: bytes) -> str
+- parse_docx(content: bytes) -> str
+- parse_image_to_base64(content: bytes) -> str
+```
+
+**4. Create analyze_document tool**
+```
+backend/app/tools/analyze_document.py
+@tool
+def analyze_document(document_text: str, analysis_type: str) -> str
+    # analysis_type: "lease", "contract", "visa", "general"
+```
+
+**5. Update chat_node in main.py**
+- Detect file attachments in messages
+- Parse PDF/Word content
+- Pass to agent as context
+
+**6. Update system prompt**
+Add document analysis instructions to BASE_SYSTEM_PROMPT

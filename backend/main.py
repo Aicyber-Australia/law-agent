@@ -1,6 +1,6 @@
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage
@@ -11,8 +11,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from copilotkit import CopilotKitState, LangGraphAGUIAgent
 from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 
-from app.tools import lookup_law, find_lawyer
+from app.tools import lookup_law, find_lawyer, analyze_document
 from app.tools.generate_checklist import generate_checklist
+from app.utils.document_parser import parse_document
 from app.config import logger
 
 app = FastAPI(
@@ -32,7 +33,7 @@ app.add_middleware(
 
 # Setup Agent Logic
 model = ChatOpenAI(model="gpt-4o", temperature=0)
-tools = [lookup_law, find_lawyer, generate_checklist]
+tools = [lookup_law, find_lawyer, generate_checklist, analyze_document]
 model_with_tools = model.bind_tools(tools)
 
 BASE_SYSTEM_PROMPT = """
@@ -42,6 +43,7 @@ CAPABILITIES:
 1. **Research**: Answer legal questions with citations using `lookup_law`
 2. **Action**: Generate step-by-step checklists using `generate_checklist`
 3. **Match**: Find lawyers using `find_lawyer`
+4. **Document Analysis**: Analyze uploaded legal documents using `analyze_document`
 
 RULES:
 1. For legal questions: Use `lookup_law(query, state)` to find legislation. DO NOT answer from memory.
@@ -50,7 +52,10 @@ RULES:
    Example: "According to the **Residential Tenancies Act 1997 s.44** (VIC)..."
 3. For "how to" questions: Use `generate_checklist(procedure, state)` tool.
 4. For lawyer requests: Use `find_lawyer(specialty, state)`.
-5. End responses with: "_This is general information, not legal advice. Please consult a qualified lawyer for your specific situation._"
+5. For uploaded documents (leases, contracts, visa docs): Use `analyze_document(document_text, analysis_type, state)`.
+   - analysis_type options: "lease", "contract", "visa", "general"
+   - When user uploads a file, the content will be provided in the message. Pass the full text to analyze_document.
+6. End responses with: "_This is general information, not legal advice. Please consult a qualified lawyer for your specific situation._"
 """
 
 
@@ -59,8 +64,8 @@ class AgentState(CopilotKitState):
     pass
 
 
-def extract_user_state(state: AgentState) -> str | None:
-    """Extract user's Australian state from CopilotKit context."""
+def extract_context_item(state: AgentState, keyword: str) -> str | None:
+    """Extract a context item from CopilotKit context by keyword in description."""
     copilotkit_data = state.get("copilotkit", {})
     context_items = copilotkit_data.get("context", [])
 
@@ -69,7 +74,7 @@ def extract_user_state(state: AgentState) -> str | None:
             description = item.description if hasattr(item, "description") else item.get("description", "")
             value = item.value if hasattr(item, "value") else item.get("value", "")
 
-            if "state" in description.lower() or "territory" in description.lower():
+            if keyword.lower() in description.lower():
                 return value
         except Exception:
             continue
@@ -77,10 +82,22 @@ def extract_user_state(state: AgentState) -> str | None:
     return None
 
 
+def extract_user_state(state: AgentState) -> str | None:
+    """Extract user's Australian state from CopilotKit context."""
+    return extract_context_item(state, "state/territory")
+
+
+def extract_uploaded_document(state: AgentState) -> str | None:
+    """Extract uploaded document content from CopilotKit context."""
+    return extract_context_item(state, "document")
+
+
 def chat_node(state: AgentState, config: RunnableConfig):
     """Main chat node that reads CopilotKit context."""
     # Extract user state from CopilotKit context
     user_state_context = extract_user_state(state)
+    # Extract uploaded document from CopilotKit context
+    uploaded_document = extract_uploaded_document(state)
 
     # Build dynamic system message
     if user_state_context:
@@ -98,7 +115,18 @@ USER LOCATION: Not yet selected.
 Ask the user to select their Australian state/territory so you can provide accurate legal information.
 """
 
-    system_message = SystemMessage(content=BASE_SYSTEM_PROMPT + state_instruction)
+    # Add document context if available
+    document_instruction = ""
+    if uploaded_document and "DOCUMENT START" in uploaded_document:
+        document_instruction = f"""
+UPLOADED DOCUMENT:
+{uploaded_document}
+
+IMPORTANT: The user has uploaded a document. When they ask to analyze it, use the analyze_document tool with the document content above.
+"""
+        logger.info("Document context found and added to system message")
+
+    system_message = SystemMessage(content=BASE_SYSTEM_PROMPT + state_instruction + document_instruction)
 
     # Invoke model with context-aware system message
     response = model_with_tools.invoke(
@@ -151,6 +179,40 @@ add_langgraph_fastapi_endpoint(
 def health_check():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    """
+    Upload and parse a document (PDF, DOCX, or image).
+    Returns the parsed text content.
+    """
+    allowed_extensions = {".pdf", ".doc", ".docx", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
+    filename = file.filename or "unknown"
+    ext = os.path.splitext(filename)[1].lower()
+
+    if ext not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {ext}. Allowed: {', '.join(allowed_extensions)}"
+        )
+
+    try:
+        content = await file.read()
+        parsed_content, content_type = parse_document(content, filename)
+
+        logger.info(f"Parsed file: {filename}, type: {content_type}, length: {len(parsed_content)}")
+
+        return {
+            "filename": filename,
+            "content_type": content_type,
+            "parsed_content": parsed_content,
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"File upload failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to parse file")
 
 
 if __name__ == "__main__":
