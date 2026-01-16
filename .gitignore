@@ -32,5 +32,3 @@ coverage/
 .DS_Store
 *.log
 *.pdf
-
-.mcp.json
