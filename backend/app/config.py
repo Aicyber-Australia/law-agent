@@ -23,3 +23,6 @@ def get_required_env(name: str) -> str:
 SUPABASE_URL = get_required_env("SUPABASE_URL")
 SUPABASE_KEY = get_required_env("SUPABASE_KEY")
 get_required_env("OPENAI_API_KEY")  # langchain_openai reads this automatically
+
+# Optional: Cohere API key for reranking (gracefully degrades if not set)
+COHERE_API_KEY = os.environ.get("COHERE_API_KEY")

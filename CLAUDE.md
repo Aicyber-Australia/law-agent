@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AusLaw AI - An Australian Legal Assistant MVP that provides legal information, lawyer matching, and step-by-step checklists for legal procedures across Australian states/territories.
+AusLaw AI - An Australian Legal Assistant MVP that provides legal information, lawyer matching, step-by-step checklists, and document analysis for legal procedures across Australian states/territories.
 
 ## Architecture
 
@@ -12,15 +12,16 @@ AusLaw AI - An Australian Legal Assistant MVP that provides legal information, l
 Frontend (Next.js)  →  /api/copilotkit  →  FastAPI Backend  →  Supabase
      ↓                      ↓                    ↓
 CopilotSidebar      HttpAgent proxy      Custom LangGraph
-+ StateSelector                          (CopilotKitState)
-+ useCopilotReadable                          ↓
-                                    Tools: lookup_law, find_lawyer,
-                                           generate_checklist
++ StateSelector     (AG-UI protocol)     (CopilotKitState)
++ FileUpload                                   ↓
++ useCopilotReadable              Tools: lookup_law, find_lawyer,
+                                  generate_checklist, analyze_document
 ```
 
 **Frontend**: Next.js 14 + CopilotKit + Tailwind CSS
 **Backend**: FastAPI + LangGraph + langchain-openai (GPT-4o)
-**Database**: Supabase PostgreSQL with full-text search (tsvector)
+**Database**: Supabase PostgreSQL with pgvector for RAG
+**Storage**: Supabase Storage for document uploads
 
 ## Development Commands
 
@@ -39,10 +40,19 @@ npm run build
 npm run lint
 ```
 
+### Data Ingestion (RAG)
+```bash
+cd backend
+python scripts/ingest_corpus.py --limit 10    # Test with 10 docs
+python scripts/ingest_corpus.py --dry-run     # Preview without changes
+python scripts/ingest_corpus.py               # Full ingestion (~6000 docs)
+```
+
 ### Database
 Run SQL files in Supabase SQL Editor:
 - `database/setup.sql` - Initial schema and mock data
 - `database/migration_v2.sql` - Adds action_templates table and state column
+- `database/migration_rag.sql` - pgvector schema for RAG (legislation_documents, legislation_chunks, hybrid_search function)
 
 ## Environment Variables
 
@@ -51,18 +61,42 @@ Backend `.env` file in `/backend`:
 SUPABASE_URL=
 SUPABASE_KEY=
 OPENAI_API_KEY=
+COHERE_API_KEY=          # Optional: for reranking (gracefully degrades if not set)
+```
+
+Frontend `.env.local` file in `/frontend`:
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
 ```
 
 ## Key Architecture Decisions
 
+### RAG System (Advanced Retrieval)
+The `lookup_law` tool uses a hybrid retrieval pipeline:
+1. **Hybrid Search**: Vector similarity (pgvector) + PostgreSQL full-text search
+2. **RRF Fusion**: Reciprocal Rank Fusion merges results from both search methods
+3. **Reranking**: Optional Cohere rerank for final precision (falls back to RRF if not configured)
+4. **Parent-Child Chunks**: Child chunks (500 tokens) for precise retrieval, parent chunks (2000 tokens) for context
+
+**Data Source**: Hugging Face `isaacus/open-australian-legal-corpus` (Primary Legislation only)
+**Supported Jurisdictions**: NSW, QLD, FEDERAL (no Victoria data in corpus)
+
 ### CopilotKit Context Passing
 The agent uses a **custom StateGraph** (not `create_react_agent`) to properly read frontend context:
-- Frontend uses `useCopilotReadable` to share user's selected state
+- Frontend uses `useCopilotReadable` to share user's selected state and uploaded document URL
 - Backend inherits from `CopilotKitState` and reads `state["copilotkit"]["context"]`
-- Context items are Pydantic-like objects (use `item.description`, not `item.get("description")`)
+- **Important**: AG-UI protocol double-serializes string values. Use `clean_context_value()` in main.py to strip extra quotes and unescape inner quotes.
 
 ### State-Based Legal Information
-Australian law varies by state. The `StateSelector` component lets users pick their state (VIC, NSW, QLD, etc.), which is passed to all tool calls automatically.
+Australian law varies by state. The `StateSelector` component lets users pick their state (VIC, NSW, QLD, etc.), which is passed to all tool calls automatically. For unsupported states (VIC, SA, WA, TAS, NT), the system falls back to Federal law.
+
+### Document Upload Flow
+Files are uploaded to Supabase Storage (not backend memory) for persistence:
+1. Frontend uploads to Supabase Storage bucket `documents`
+2. Public URL shared with agent via `useCopilotReadable`
+3. Agent calls `analyze_document(document_url=...)`
+4. Tool fetches file from URL, parses it, returns text for agent to analyze
 
 ## Backend Structure
 
@@ -72,82 +106,46 @@ backend/
 ├── app/
 │   ├── config.py           # Environment variables, logging
 │   ├── db/supabase_client.py
-│   └── tools/
-│       ├── lookup_law.py       # Full-text search in legal_docs
-│       ├── find_lawyer.py      # Filter by location/specialty
-│       └── generate_checklist.py  # LLM-generated or template-based checklists
+│   ├── services/           # RAG services
+│   │   ├── embedding_service.py   # OpenAI text-embedding-3-small
+│   │   ├── hybrid_retriever.py    # Vector + FTS + RRF fusion
+│   │   └── reranker.py            # Cohere reranker (optional)
+│   ├── tools/
+│   │   ├── lookup_law.py       # RAG-based legal search
+│   │   ├── find_lawyer.py      # Filter by location/specialty
+│   │   ├── generate_checklist.py  # LLM-generated or template-based
+│   │   └── analyze_document.py # Fetch & parse docs for agent analysis
+│   └── utils/
+│       ├── document_parser.py  # PDF, DOCX, image parsing
+│       └── url_fetcher.py      # Fetch documents from URLs
+├── scripts/
+│   └── ingest_corpus.py    # Hugging Face dataset ingestion
 ```
-
-Note: `app/agents/` directory exists but is not currently used. The main.py contains a simpler single-agent architecture.
 
 ## Database Schema
 
-**legal_docs**: `id`, `content`, `metadata` (JSONB), `state`, `search_vector` (tsvector)
+### Original Tables (mock data)
+- **legal_docs**: `id`, `content`, `metadata` (JSONB), `state`, `search_vector` (tsvector)
+- **lawyers**: `id`, `name`, `specialty`, `location`, `rate`
+- **action_templates**: `id`, `state`, `category`, `title`, `keywords` (array), `steps` (JSONB)
 
-**lawyers**: `id`, `name`, `specialty`, `location`, `rate`
+### RAG Tables (real legislation)
+- **legislation_documents**: `id`, `version_id`, `citation`, `jurisdiction`, `source_url`, `full_text`
+- **legislation_chunks**: `id`, `document_id`, `parent_chunk_id`, `content`, `embedding` (vector 1536), `chunk_type`, `content_tsv` (tsvector)
 
-**action_templates**: `id`, `state`, `category`, `title`, `keywords` (array), `steps` (JSONB)
+### Key SQL Function
+`hybrid_search(query_embedding, query_text, filter_jurisdiction, match_count)` - Performs combined vector + keyword search with automatic handling of parent-only chunks (small documents).
 
-## Full-Text Search
+## Chunking Strategy
 
-The `lookup_law` tool converts queries to PostgreSQL tsquery with OR logic:
-```
-"rent increase" → "rent | increase"
-```
+| Document Size | Strategy |
+|--------------|----------|
+| < 10K chars | Parent chunks only (no children) |
+| >= 10K chars | Parent (2000 tokens) + Child (500 tokens) chunks |
+
+Retrieval uses child chunks for precision, then fetches parent chunk for fuller context.
 
 ## Code Style
 
 - All comments and documentation must be in English
 - After completing code changes, generate a commit message summarizing the changes
-
----
-
-## Planned Feature: Document Upload & Analysis
-
-Add capability to upload and analyze legal documents (leases, contracts, visa docs).
-
-### Why No Sub-graph Needed
-- Simple single tool flow: upload → parse → analyze
-- No complex multi-step state management
-- GPT-4o Vision handles images directly
-
-### Implementation Steps
-
-**1. Frontend - Enable file upload**
-```tsx
-// frontend/app/page.tsx
-<CopilotSidebar
-  imageUploadsEnabled={true}
-  inputFileAccept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
-  ...
-/>
-```
-
-**2. Backend - Install dependencies**
-```bash
-pip install pypdf python-docx pillow
-```
-
-**3. Create document parser**
-```
-backend/app/utils/document_parser.py
-- parse_pdf(content: bytes) -> str
-- parse_docx(content: bytes) -> str
-- parse_image_to_base64(content: bytes) -> str
-```
-
-**4. Create analyze_document tool**
-```
-backend/app/tools/analyze_document.py
-@tool
-def analyze_document(document_text: str, analysis_type: str) -> str
-    # analysis_type: "lease", "contract", "visa", "general"
-```
-
-**5. Update chat_node in main.py**
-- Detect file attachments in messages
-- Parse PDF/Word content
-- Pass to agent as context
-
-**6. Update system prompt**
-Add document analysis instructions to BASE_SYSTEM_PROMPT
