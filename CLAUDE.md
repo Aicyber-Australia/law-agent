@@ -70,13 +70,15 @@ Backend `.env` file in `/backend`:
 SUPABASE_URL=
 SUPABASE_KEY=
 OPENAI_API_KEY=
-COHERE_API_KEY=          # Optional: for reranking (gracefully degrades if not set)
+COHERE_API_KEY=              # Optional: for reranking (gracefully degrades if not set)
+ALLOWED_DOCUMENT_HOSTS=      # Required: your Supabase domain (e.g., your-project.supabase.co)
 ```
 
 Frontend `.env.local` file in `/frontend`:
 ```
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
+BACKEND_URL=http://localhost:8000    # For production: set to deployed backend URL
 ```
 
 ## Key Architecture Decisions

@@ -6,12 +6,14 @@ import {
 } from "@copilotkit/runtime";
 import { HttpAgent } from "@ag-ui/client";
 
+const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
+
 const serviceAdapter = new ExperimentalEmptyAdapter();
 
 const runtime = new CopilotRuntime({
   agents: {
     auslaw_agent: new HttpAgent({
-      url: "http://localhost:8000/copilotkit",
+      url: `${BACKEND_URL}/copilotkit`,
     }),
   },
 });
