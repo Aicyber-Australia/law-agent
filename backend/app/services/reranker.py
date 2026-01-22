@@ -31,6 +31,7 @@ class CohereReranker:
     """
 
     MODEL = "rerank-english-v3.0"
+    MIN_RELEVANCE_SCORE = 0.25  # Filter results below this threshold
 
     def __init__(self):
         if COHERE_AVAILABLE and COHERE_API_KEY:
@@ -82,12 +83,33 @@ class CohereReranker:
                 return_documents=False
             )
 
-            # Build reranked results
+            # Build reranked results with confidence levels
             reranked = []
             for result in response.results:
+                score = result.relevance_score
+
+                # Filter out low-relevance results
+                if score < self.MIN_RELEVANCE_SCORE:
+                    continue
+
                 doc = documents[result.index].copy()
-                doc["rerank_score"] = result.relevance_score
+                doc["rerank_score"] = score
+
+                # Add confidence level
+                if score > 0.6:
+                    doc["confidence"] = "high"
+                elif score > 0.4:
+                    doc["confidence"] = "medium"
+                else:
+                    doc["confidence"] = "low"
+
                 reranked.append(doc)
+
+            if not reranked and documents:
+                logger.info(
+                    f"All {len(documents)} results filtered out due to low relevance "
+                    f"(threshold: {self.MIN_RELEVANCE_SCORE})"
+                )
 
             return reranked
 

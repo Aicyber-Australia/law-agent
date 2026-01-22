@@ -13,13 +13,13 @@ llm = ChatOpenAI(model="gpt-4o", temperature=0)
 
 
 @tool
-def generate_checklist(procedure: str, state: str = "VIC") -> str:
+def generate_checklist(procedure: str, state: str) -> str:
     """
     Generate a step-by-step checklist for a legal procedure.
 
     Args:
         procedure: Description of what the user wants to do (e.g., "get my bond back", "break my lease")
-        state: Australian state (VIC, NSW, QLD, etc.). Defaults to VIC.
+        state: Australian state - REQUIRED. Use the user's selected state (VIC, NSW, QLD, etc.).
 
     Returns:
         A formatted checklist with numbered steps.

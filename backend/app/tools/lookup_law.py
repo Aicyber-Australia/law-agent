@@ -26,7 +26,7 @@ UNSUPPORTED_STATES = ["VIC", "SA", "WA", "TAS", "NT"]
 
 
 @tool
-def lookup_law(query: str, state: str = "VIC") -> str | list[dict]:
+def lookup_law(query: str, state: str) -> str | list[dict]:
     """
     Search for Australian laws/acts using advanced RAG retrieval.
 
@@ -36,7 +36,8 @@ def lookup_law(query: str, state: str = "VIC") -> str | list[dict]:
     Args:
         query: Legal question or keywords (e.g., 'rent increase notice period',
                'tenant bond refund rights', 'criminal sentencing guidelines').
-        state: Australian state/territory code (NSW, QLD, FEDERAL supported).
+        state: Australian state/territory code - REQUIRED. Use the user's selected
+               state (NSW, QLD, VIC, SA, WA, TAS, NT, ACT, or FEDERAL).
                For unsupported states (VIC, SA, WA, TAS, NT), falls back to
                showing relevant Federal law.
 
@@ -66,7 +67,31 @@ def lookup_law(query: str, state: str = "VIC") -> str | list[dict]:
         # Batch fetch all parent contents (single query instead of N queries)
         parent_contents = _get_parent_contents_batch(results)
 
+        # Determine overall result quality based on confidence levels
+        confidence_levels = [r.get("confidence", "low") for r in results]
+        has_high_confidence = "high" in confidence_levels
+        has_medium_confidence = "medium" in confidence_levels
+
+        if has_high_confidence:
+            result_quality = "good"
+        elif has_medium_confidence:
+            result_quality = "uncertain"
+        else:
+            result_quality = "low_confidence"
+
         formatted_results = []
+
+        # Add quality warning for uncertain results
+        if result_quality == "low_confidence":
+            formatted_results.append({
+                "warning": "The following results may not directly address your question. "
+                           "Consider rephrasing your query or consulting a legal professional."
+            })
+        elif result_quality == "uncertain":
+            formatted_results.append({
+                "note": "These results appear relevant but may not fully address your specific question."
+            })
+
         for chunk in results:
             parent_id = chunk.get("parent_chunk_id")
             parent_content = parent_contents.get(parent_id) if parent_id else None
@@ -80,16 +105,20 @@ def lookup_law(query: str, state: str = "VIC") -> str | list[dict]:
                     chunk.get("rerank_score", chunk.get("rrf_score", 0)),
                     3
                 ),
+                "confidence": chunk.get("confidence", "unknown"),
             }
             formatted_results.append(result)
 
         # Add note if showing federal law for unsupported state
-        if is_unsupported and formatted_results:
+        if is_unsupported:
             formatted_results.insert(0, {
                 "note": f"Note: {state} legislation is not yet available in our database. "
                         f"Showing relevant Federal law instead. For state-specific advice, "
                         f"please consult a legal professional."
             })
+
+        # Add metadata about result quality
+        formatted_results.append({"result_quality": result_quality})
 
         return formatted_results
 

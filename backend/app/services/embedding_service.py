@@ -2,6 +2,7 @@
 Embedding Service for RAG
 
 Uses OpenAI's text-embedding-3-small model for generating embeddings.
+Includes retry logic with exponential backoff for transient failures.
 """
 
 import asyncio
@@ -15,29 +16,47 @@ class EmbeddingService:
 
     MODEL = "text-embedding-3-small"
     DIMENSION = 1536
+    MAX_RETRIES = 3
+    BASE_DELAY = 1.0  # seconds
 
     def __init__(self):
         self.client = AsyncOpenAI()
 
     async def embed_text(self, text: str) -> List[float]:
         """
-        Generate embedding for a single text.
+        Generate embedding for a single text with retry logic.
 
         Args:
             text: The text to embed
 
         Returns:
             List of floats representing the embedding vector
+
+        Raises:
+            Exception: If all retries fail
         """
-        try:
-            response = await self.client.embeddings.create(
-                model=self.MODEL,
-                input=text
-            )
-            return response.data[0].embedding
-        except Exception as e:
-            logger.error(f"Error generating embedding: {e}")
-            raise
+        last_error = None
+
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                response = await self.client.embeddings.create(
+                    model=self.MODEL,
+                    input=text
+                )
+                return response.data[0].embedding
+            except Exception as e:
+                last_error = e
+                if attempt < self.MAX_RETRIES - 1:
+                    delay = self.BASE_DELAY * (2 ** attempt)
+                    logger.warning(
+                        f"Embedding API error (attempt {attempt + 1}/{self.MAX_RETRIES}): {e}. "
+                        f"Retrying in {delay}s..."
+                    )
+                    await asyncio.sleep(delay)
+                else:
+                    logger.error(f"Embedding API failed after {self.MAX_RETRIES} attempts: {e}")
+
+        raise last_error
 
     async def embed_batch(
         self,
@@ -45,7 +64,7 @@ class EmbeddingService:
         batch_size: int = 100
     ) -> List[List[float]]:
         """
-        Generate embeddings for multiple texts with batching.
+        Generate embeddings for multiple texts with batching and retry logic.
 
         Args:
             texts: List of texts to embed
@@ -58,22 +77,38 @@ class EmbeddingService:
 
         for i in range(0, len(texts), batch_size):
             batch = texts[i:i + batch_size]
+            last_error = None
 
-            try:
-                response = await self.client.embeddings.create(
-                    model=self.MODEL,
-                    input=batch
-                )
-                batch_embeddings = [d.embedding for d in response.data]
-                all_embeddings.extend(batch_embeddings)
+            for attempt in range(self.MAX_RETRIES):
+                try:
+                    response = await self.client.embeddings.create(
+                        model=self.MODEL,
+                        input=batch
+                    )
+                    batch_embeddings = [d.embedding for d in response.data]
+                    all_embeddings.extend(batch_embeddings)
 
-                # Rate limit protection
-                if i + batch_size < len(texts):
-                    await asyncio.sleep(0.1)
+                    # Rate limit protection
+                    if i + batch_size < len(texts):
+                        await asyncio.sleep(0.1)
+                    break  # Success, exit retry loop
 
-            except Exception as e:
-                logger.error(f"Error generating batch embeddings at index {i}: {e}")
-                raise
+                except Exception as e:
+                    last_error = e
+                    if attempt < self.MAX_RETRIES - 1:
+                        delay = self.BASE_DELAY * (2 ** attempt)
+                        logger.warning(
+                            f"Batch embedding error at index {i} "
+                            f"(attempt {attempt + 1}/{self.MAX_RETRIES}): {e}. "
+                            f"Retrying in {delay}s..."
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.error(
+                            f"Batch embedding failed at index {i} "
+                            f"after {self.MAX_RETRIES} attempts: {e}"
+                        )
+                        raise last_error
 
         return all_embeddings
 

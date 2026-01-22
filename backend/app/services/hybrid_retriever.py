@@ -22,6 +22,7 @@ class HybridRetriever:
     """
 
     RRF_K = 60  # RRF constant (standard value)
+    MIN_RRF_SCORE = 0.01  # Filter very weak matches before reranking
 
     def __init__(self):
         self.embedding_service = get_embedding_service()
@@ -65,14 +66,26 @@ class HybridRetriever:
             # Apply RRF scoring
             results = self._apply_rrf(response.data)
 
-            # Sort by RRF score and return top_k
+            # Sort by RRF score
             sorted_results = sorted(
                 results,
                 key=lambda x: x.get("rrf_score", 0),
                 reverse=True
             )
 
-            return sorted_results[:top_k]
+            # Filter out very weak matches
+            filtered_results = [
+                r for r in sorted_results
+                if r.get("rrf_score", 0) >= self.MIN_RRF_SCORE
+            ]
+
+            if len(filtered_results) < len(sorted_results):
+                logger.debug(
+                    f"Filtered {len(sorted_results) - len(filtered_results)} weak RRF matches "
+                    f"(threshold: {self.MIN_RRF_SCORE})"
+                )
+
+            return filtered_results[:top_k]
 
         except Exception as e:
             logger.error(f"Hybrid search error: {e}")

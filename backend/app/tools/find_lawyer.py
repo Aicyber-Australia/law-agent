@@ -17,13 +17,13 @@ STATE_TO_CITY = {
 
 
 @tool
-def find_lawyer(specialty: str, state: str = "VIC") -> str | list[dict]:
+def find_lawyer(specialty: str, state: str) -> str | list[dict]:
     """
     Find a lawyer based on specialty and state.
 
     Args:
         specialty: Area of law (e.g., "Tenancy", "Employment", "Family Law", "Commercial").
-        state: Australian state code (VIC, NSW, QLD, etc.). Defaults to VIC.
+        state: Australian state code - REQUIRED. Use the user's selected state (VIC, NSW, QLD, etc.).
 
     Returns:
         List of matching lawyers with name, specialty, location, and rate.
