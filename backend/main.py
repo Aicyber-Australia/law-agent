@@ -8,16 +8,9 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage
-from langchain_core.runnables import RunnableConfig
-from langgraph.graph import StateGraph, END
-from langgraph.prebuilt import ToolNode
-from langgraph.checkpoint.memory import MemorySaver
-from copilotkit import CopilotKitState, LangGraphAGUIAgent
+from copilotkit import LangGraphAGUIAgent
 from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 
-from app.tools import lookup_law, find_lawyer, analyze_document
-from app.tools.generate_checklist import generate_checklist
 from app.utils.document_parser import parse_document
 from app.config import logger, CORS_ORIGINS
 from app.db import supabase
@@ -116,194 +109,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(RateLimitMiddleware)
 
-# Setup Agent Logic
-model = ChatOpenAI(model="gpt-4o", temperature=0)
-tools = [lookup_law, find_lawyer, generate_checklist, analyze_document]
-model_with_tools = model.bind_tools(tools)
-
-BASE_SYSTEM_PROMPT = """
-You are 'AusLaw AI', a transparent Australian legal assistant.
-
-CAPABILITIES:
-1. **Research**: Answer legal questions with citations using `lookup_law`
-2. **Action**: Generate step-by-step checklists using `generate_checklist`
-3. **Match**: Find lawyers using `find_lawyer`
-4. **Document Analysis**: Analyze uploaded legal documents using `analyze_document`
-
-RULES:
-0. **STATE REQUIRED**: Before using ANY tool (except analyze_document), you MUST have the user's state from the context. If no state is selected, DO NOT call tools - instead ask the user to select their state first.
-1. For legal questions: ALWAYS use `lookup_law(query, state)` first. You MUST base your answer ONLY on the results returned.
-2. CRITICAL - CITATIONS: You may ONLY cite legislation that appears in the lookup_law results.
-   - If lookup_law returns results: Cite using the exact citation and source_url from the results
-   - If lookup_law returns no results or "No legislation found": Tell the user honestly that you couldn't find relevant legislation in the database for their query. Do NOT make up citations from your training data.
-   - NEVER invent section numbers or Act names that weren't in the RAG results
-3. CITATIONS FORMAT (only for results from lookup_law):
-   "According to the **[Act Name]** ([State]): [quote from content]"
-   Include the source URL when available: "Source: [source_url]"
-4. For "how to" questions: Use `generate_checklist(procedure, state)` tool.
-5. For lawyer requests: Use `find_lawyer(specialty, state)`.
-6. For uploaded documents (leases, contracts, visa docs): Use `analyze_document(document_url, analysis_type, state)`.
-   - analysis_type options: "lease", "contract", "visa", "general"
-   - When user uploads a file, the document URL will be provided. Pass the URL to analyze_document.
-   - The tool returns the document text. YOU must then analyze it thoroughly.
-7. End responses with: "_This is general information, not legal advice. Please consult a qualified lawyer for your specific situation._"
-
-DOCUMENT ANALYSIS GUIDELINES:
-When analyze_document returns document content, provide a thorough analysis with this structure:
-
-## Document Summary
-Brief overview of what this document is and its purpose.
-
-## Key Terms & Conditions
-- List important terms as bullet points
-- Include amounts, durations, obligations
-
-## Important Dates & Deadlines
-- Any dates that need attention
-- Notice periods, expiry dates
-
-## Potential Concerns
-- Unusual or one-sided terms
-- Clauses that may be problematic under the relevant state law
-- Missing protections
-
-## Recommendations
-- What the user should do or be aware of
-- Questions to ask before signing
-
-Be thorough but use clear language accessible to non-lawyers.
-"""
-
-
-# Define state that inherits from CopilotKitState
-class AgentState(CopilotKitState):
-    pass
-
-
-def extract_context_item(state: AgentState, keyword: str) -> str | None:
-    """Extract a context item from CopilotKit context by keyword in description."""
-    copilotkit_data = state.get("copilotkit", {})
-    context_items = copilotkit_data.get("context", [])
-
-    for item in context_items:
-        try:
-            # CopilotContextItem can be a TypedDict or an object with attributes
-            description = item.get("description", "") if isinstance(item, dict) else getattr(item, "description", "")
-            value = item.get("value", "") if isinstance(item, dict) else getattr(item, "value", "")
-
-            if keyword.lower() in description.lower():
-                return value
-        except Exception:
-            continue
-
-    return None
-
-
-def clean_context_value(value: str | None) -> str | None:
-    """Remove extra quotes from context values if present."""
-    if value and isinstance(value, str):
-        # Strip leading/trailing quotes that may be added by serialization
-        if value.startswith('"') and value.endswith('"'):
-            value = value[1:-1]
-        # Unescape inner quotes
-        value = value.replace('\\"', '"')
-    return value
-
-
-def extract_user_state(state: AgentState) -> str | None:
-    """Extract user's Australian state from CopilotKit context."""
-    return clean_context_value(extract_context_item(state, "state/territory"))
-
-
-def extract_uploaded_document(state: AgentState) -> str | None:
-    """Extract uploaded document content from CopilotKit context."""
-    return clean_context_value(extract_context_item(state, "document"))
-
-
-def chat_node(state: AgentState, config: RunnableConfig):
-    """Main chat node that reads CopilotKit context."""
-    # Extract user state from CopilotKit context
-    user_state_context = extract_user_state(state)
-    # Extract uploaded document from CopilotKit context
-    uploaded_document = extract_uploaded_document(state)
-
-    # Build dynamic system message
-    if user_state_context:
-        state_instruction = f"""
-USER LOCATION CONTEXT:
-{user_state_context}
-
-CRITICAL: The user's state is provided above. You MUST use this state for ALL tool calls.
-- DO NOT ask for the user's state or location - you already have it!
-- Use the state code (VIC, NSW, QLD, SA, WA, TAS, NT, ACT) from the context above for all tools.
-"""
-    else:
-        state_instruction = """
-USER LOCATION: NOT SELECTED
-
-**CRITICAL**: The user has NOT selected their Australian state/territory yet.
-You MUST NOT call lookup_law, find_lawyer, or generate_checklist tools until the user selects their state.
-
-DO NOT assume or guess the user's state. DO NOT use a default state like VIC.
-
-Instead, ask the user to select their state/territory using the dropdown in the sidebar before you can help with their legal question.
-
-Example response: "I'd be happy to help with your question about [topic]. However, Australian law varies by state. Could you please select your state or territory from the dropdown on the left? This will ensure I give you accurate information for your jurisdiction."
-"""
-
-    # Add document context if available (URL-based)
-    document_instruction = ""
-    if uploaded_document and "document url" in uploaded_document.lower():
-        document_instruction = f"""
-UPLOADED DOCUMENT:
-{uploaded_document}
-
-IMPORTANT: The user has uploaded a document. When they ask to analyze it, use the analyze_document tool with the document_url parameter from the context above.
-"""
-
-    system_message = SystemMessage(content=BASE_SYSTEM_PROMPT + state_instruction + document_instruction)
-
-    # Invoke model with context-aware system message
-    response = model_with_tools.invoke(
-        [system_message, *state["messages"]],
-        config
-    )
-
-    return {"messages": [response]}
-
-
-def should_continue(state: AgentState):
-    """Check if we should continue to tools or end."""
-    messages = state["messages"]
-    last_message = messages[-1]
-
-    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        return "tools"
-    return END
-
-
-# Build the graph
-workflow = StateGraph(AgentState)
-
-# Add nodes
-workflow.add_node("chat", chat_node)
-workflow.add_node("tools", ToolNode(tools))
-
-# Add edges
-workflow.set_entry_point("chat")
-workflow.add_conditional_edges("chat", should_continue, {"tools": "tools", END: END})
-workflow.add_edge("tools", "chat")
-
-# Compile with checkpointer
-checkpointer = MemorySaver()
-graph = workflow.compile(checkpointer=checkpointer)
+# Build the adaptive graph (handles both simple and complex queries via routing)
+from app.agents.adaptive_graph import get_adaptive_graph
+graph = get_adaptive_graph()
+agent_description = (
+    "Australian Legal Assistant with adaptive depth analysis - "
+    "provides comprehensive legal research, risk analysis, strategy recommendations, "
+    "and structured lawyer handoff briefs"
+)
 
 # Integrate with CopilotKit (using LangGraphAGUIAgent)
 add_langgraph_fastapi_endpoint(
     app=app,
     agent=LangGraphAGUIAgent(
         name="auslaw_agent",
-        description="Australian Legal Assistant that searches laws, generates checklists, and finds lawyers",
+        description=agent_description,
         graph=graph,
     ),
     path="/copilotkit",

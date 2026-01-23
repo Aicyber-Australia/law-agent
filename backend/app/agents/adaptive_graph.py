@@ -24,6 +24,7 @@ Architecture:
                                           [8] Escalation Brief
 """
 
+import re
 import uuid
 from typing import Literal
 
@@ -34,6 +35,76 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
 from app.agents.adaptive_state import AdaptiveAgentState, RoutingDecision
+from app.config import logger
+
+
+# ============================================
+# CopilotKit Context Extraction
+# ============================================
+
+def extract_context_item(state: AdaptiveAgentState, keyword: str) -> str | None:
+    """Extract a context item from CopilotKit context by keyword in description."""
+    copilotkit_data = state.get("copilotkit", {})
+    if not copilotkit_data:
+        return None
+
+    context_items = copilotkit_data.get("context", [])
+
+    for item in context_items:
+        try:
+            description = item.get("description", "") if isinstance(item, dict) else getattr(item, "description", "")
+            value = item.get("value", "") if isinstance(item, dict) else getattr(item, "value", "")
+
+            if keyword.lower() in description.lower():
+                return value
+        except Exception:
+            continue
+
+    return None
+
+
+def clean_context_value(value: str | None) -> str | None:
+    """Remove extra quotes from context values if present."""
+    if value and isinstance(value, str):
+        if value.startswith('"') and value.endswith('"'):
+            value = value[1:-1]
+        value = value.replace('\\"', '"')
+    return value
+
+
+def extract_user_state_from_context(state: AdaptiveAgentState) -> str | None:
+    """Extract user's Australian state from CopilotKit context."""
+    raw_value = extract_context_item(state, "state/territory")
+    cleaned = clean_context_value(raw_value)
+
+    if not cleaned:
+        return None
+
+    # Extract state code (e.g., "NSW" from "User is in NSW")
+    state_codes = ["NSW", "VIC", "QLD", "SA", "WA", "TAS", "NT", "ACT"]
+    for code in state_codes:
+        if code in cleaned.upper():
+            return code
+
+    return cleaned
+
+
+def extract_document_url_from_context(state: AdaptiveAgentState) -> str | None:
+    """Extract uploaded document URL from CopilotKit context."""
+    raw_value = extract_context_item(state, "document")
+    cleaned = clean_context_value(raw_value)
+
+    if not cleaned:
+        return None
+
+    # Extract URL from context string
+    url_match = re.search(r'https?://[^\s"]+', cleaned)
+    if url_match:
+        return url_match.group(0)
+
+    return None
+
+
 from app.agents.stages import (
     safety_gate_node,
     route_after_safety,
@@ -253,7 +324,7 @@ def get_response_generator() -> ResponseGenerator:
 # ============================================
 
 async def initialize_node(state: AdaptiveAgentState) -> dict:
-    """Initialize state with session ID and extract query from messages."""
+    """Initialize state with session ID, extract query and CopilotKit context."""
     messages = state.get("messages", [])
     current_query = ""
 
@@ -265,11 +336,21 @@ async def initialize_node(state: AdaptiveAgentState) -> dict:
 
     session_id = state.get("session_id") or str(uuid.uuid4())
 
-    logger.info(f"Initializing adaptive agent: session={session_id[:8]}, query_length={len(current_query)}")
+    # Extract CopilotKit context
+    user_state = extract_user_state_from_context(state)
+    uploaded_document_url = extract_document_url_from_context(state)
+
+    logger.info(
+        f"Initializing adaptive agent: session={session_id[:8]}, "
+        f"query_length={len(current_query)}, user_state={user_state}, "
+        f"has_document={bool(uploaded_document_url)}"
+    )
 
     return {
         "session_id": session_id,
         "current_query": current_query,
+        "user_state": user_state,
+        "uploaded_document_url": uploaded_document_url,
         "current_stage": "initialize",
         "stages_completed": ["initialize"],
     }
