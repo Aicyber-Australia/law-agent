@@ -13,6 +13,14 @@ from app.agents.stages.jurisdiction import (
     jurisdiction_node,
     get_jurisdiction_resolver,
 )
+from app.agents.stages.fact_structuring import (
+    fact_structuring_node,
+    get_fact_structurer,
+)
+from app.agents.stages.legal_elements import (
+    legal_elements_node,
+    get_legal_elements_analyzer,
+)
 
 __all__ = [
     # Stage 0: Safety Gate
@@ -25,4 +33,10 @@ __all__ = [
     # Stage 2: Jurisdiction
     "jurisdiction_node",
     "get_jurisdiction_resolver",
+    # Stage 3: Fact Structuring
+    "fact_structuring_node",
+    "get_fact_structurer",
+    # Stage 4: Legal Elements
+    "legal_elements_node",
+    "get_legal_elements_analyzer",
 ]
