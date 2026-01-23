@@ -95,13 +95,9 @@ BACKEND_URL=http://localhost:8000    # For production: set to deployed backend U
 ### RAG System (Advanced Retrieval)
 The `lookup_law` tool uses a hybrid retrieval pipeline:
 1. **Hybrid Search**: Vector similarity (pgvector) + PostgreSQL full-text search
-2. **RRF Fusion**: Reciprocal Rank Fusion merges results (MIN_RRF_SCORE = 0.01 filters weak matches)
-3. **Reranking**: Cohere rerank with MIN_RELEVANCE_SCORE = 0.25 threshold (falls back to RRF if not configured)
-4. **Confidence Levels**: Results tagged as high (>0.6), medium (0.4-0.6), or low (0.25-0.4)
-5. **Quality-Aware Responses**: Warnings added when only low-confidence results found
-6. **Parent-Child Chunks**: Child chunks (500 tokens) for precise retrieval, parent chunks (2000 tokens) for context
-
-**Retry Logic**: Embedding API calls retry 3x with exponential backoff (1s, 2s, 4s delays)
+2. **RRF Fusion**: Reciprocal Rank Fusion merges results from both search methods
+3. **Reranking**: Optional Cohere rerank for final precision (falls back to RRF if not configured)
+4. **Parent-Child Chunks**: Child chunks (500 tokens) for precise retrieval, parent chunks (2000 tokens) for context
 
 **Data Source**: Hugging Face `isaacus/open-australian-legal-corpus` (Primary Legislation only)
 **Supported Jurisdictions**: NSW, QLD, FEDERAL (no Victoria data in corpus)
@@ -113,7 +109,7 @@ The agent uses a **custom StateGraph** (not `create_react_agent`) to properly re
 - **Important**: AG-UI protocol double-serializes string values. Use `clean_context_value()` in main.py to strip extra quotes and unescape inner quotes.
 
 ### State-Based Legal Information
-Australian law varies by state. The `StateSelector` component lets users pick their state (VIC, NSW, QLD, etc.), which is passed to all tool calls automatically. **All tools require the state parameter - there are no defaults** to prevent incorrect jurisdiction assumptions. For unsupported states (VIC, SA, WA, TAS, NT), the system falls back to Federal law.
+Australian law varies by state. The `StateSelector` component lets users pick their state (VIC, NSW, QLD, etc.), which is passed to all tool calls automatically. For unsupported states (VIC, SA, WA, TAS, NT), the system falls back to Federal law.
 
 ### Document Upload Flow
 Files are uploaded to Supabase Storage (not backend memory) for persistence:
@@ -121,17 +117,6 @@ Files are uploaded to Supabase Storage (not backend memory) for persistence:
 2. Public URL shared with agent via `useCopilotReadable`
 3. Agent calls `analyze_document(document_url=...)`
 4. Tool fetches file from URL, parses it, returns text for agent to analyze
-
-## Production Features
-
-### Startup Validation
-Backend validates Supabase and OpenAI connections on startup. Server exits if either fails.
-
-### Rate Limiting
-`/copilotkit` endpoint limited to 30 requests/minute per IP address.
-
-### SSRF Protection
-Document fetcher only allows URLs from domains in `ALLOWED_DOCUMENT_HOSTS`.
 
 ## Backend Structure
 
@@ -194,8 +179,7 @@ The ingestion script uses batch inserts for chunks (all parent chunks in one INS
 ```
 frontend/
 ├── app/
-│   ├── page.tsx                # Landing page
-│   ├── chat/page.tsx           # Main chat interface with CopilotChat
+│   ├── page.tsx                # Main page with CopilotChat integration
 │   ├── layout.tsx              # Root layout with CopilotKit provider
 │   ├── globals.css             # Tailwind + shadcn CSS variables
 │   ├── components/
@@ -217,3 +201,120 @@ npx shadcn@latest add <component-name>
 
 - All comments and documentation must be in English
 - After completing code changes, generate a commit message summarizing the changes
+
+---
+
+## Adaptive Agent Workflow (In Progress)
+
+### Overview
+Transforming the agent from a simple chat↔tools loop into an **8-stage professional legal workflow** with **adaptive depth routing** - simple queries stay fast, complex queries get full analysis.
+
+### Architecture
+```
+┌─────────────────────────────────────────────────────────────┐
+│  [0] SAFETY GATE (always runs)                              │
+└─────────────────────────────────────────────────────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+         ESCALATE        SIMPLE PATH     COMPLEX PATH
+        (high-risk)      (~3k tokens)    (~9k tokens)
+              │               │               │
+              ▼               ▼               ▼
+         Crisis           [1] Issue ID    [1] Issue ID
+         Resources        [2] Jurisdiction [2] Jurisdiction
+                          [7] Strategy    [3] Fact Structure
+                                          [4] Elements Map
+                                          [5] Case Precedent
+                                          [6] Risk Analysis
+                                          [7] Strategy
+                                          [8] Escalation Brief
+```
+
+### Implementation Status
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| **Phase 1** | ✅ Complete | Safety gate foundation (adaptive_state, emergency_resources, safety_router, safety_gate, tests) |
+| **Phase 2** | ✅ Complete | Issue identification + complexity router + jurisdiction (23 tests) |
+| **Phase 3** | ⏳ Pending | Complex path core (fact structuring, legal elements) |
+| **Phase 4** | ⏳ Pending | Case precedent + risk analysis (requires mock case data migration) |
+| **Phase 5** | ⏳ Pending | Strategy + full integration with main.py |
+
+### New File Structure (Adaptive Agent)
+```
+backend/app/agents/
+├── adaptive_state.py           # ✅ Extended TypedDict for all 8 stages
+├── adaptive_graph.py           # ⏳ Main orchestration graph (Phase 5)
+├── routers/
+│   ├── __init__.py             # ✅
+│   ├── safety_router.py        # ✅ High-risk detection (GPT-4o-mini)
+│   └── complexity_router.py    # ✅ Heuristics-first + LLM fallback routing
+├── stages/
+│   ├── __init__.py             # ✅
+│   ├── safety_gate.py          # ✅ Stage 0 - always runs first
+│   ├── issue_identification.py # ✅ Stage 1 - multi-label legal classification
+│   ├── jurisdiction.py         # ✅ Stage 2 - federal vs state law resolution
+│   ├── fact_structuring.py     # ⏳ Stage 3 (Phase 3)
+│   ├── legal_elements.py       # ⏳ Stage 4 (Phase 3)
+│   ├── case_precedent.py       # ⏳ Stage 5 (Phase 4)
+│   ├── risk_analysis.py        # ⏳ Stage 6 (Phase 4)
+│   ├── strategy.py             # ⏳ Stage 7 (Phase 5)
+│   └── escalation_brief.py     # ⏳ Stage 8 (Phase 5)
+└── schemas/
+    ├── __init__.py             # ✅
+    ├── emergency_resources.py  # ✅ Australian crisis hotlines by state/category
+    └── legal_elements.py       # ⏳ Element schemas by legal area (Phase 3)
+```
+
+### Key Types (adaptive_state.py)
+- `SafetyAssessment` - High-risk detection result with crisis resources
+- `IssueClassification` - Primary/secondary legal issues with complexity score
+- `FactStructure` - Timeline, parties, evidence inventory
+- `ElementsAnalysis` - Legal elements satisfied/unsatisfied mapping
+- `PrecedentAnalysis` - Similar cases and outcome patterns
+- `RiskAssessment` - Counterfactual analysis and defences
+- `StrategyRecommendation` - Multiple pathways with pros/cons
+- `EscalationBrief` - Structured lawyer handoff package
+- `AdaptiveAgentState` - Main state combining all stage outputs
+
+### Safety Gate Categories
+The safety router detects these high-risk situations and provides state-specific crisis resources:
+- `criminal` - Police involvement, charges, arrests
+- `family_violence` - DVO/AVO, domestic abuse, threats
+- `urgent_deadline` - Court dates within 7 days, limitation periods
+- `child_welfare` - Child protection, custody emergencies
+- `suicide_self_harm` - Mental health crises
+
+### Complexity Routing (Heuristics-First)
+The complexity router uses fast heuristics before falling back to LLM:
+
+**→ COMPLEX path triggers:**
+- Document uploaded
+- Multiple secondary issues (>1)
+- Complexity score > 0.4
+- Multiple jurisdictions involved
+- Query contains: "dispute", "court", "tribunal", "sued"
+
+**→ SIMPLE path triggers:**
+- Short query with simple patterns ("what are my rights", "can my landlord")
+- Low complexity score (≤0.3) with no secondary issues
+
+**→ UNCERTAIN:** Falls back to GPT-4o-mini classification
+
+### Testing
+```bash
+pytest tests/test_safety_gate.py -v           # 16 tests for Phase 1 (safety gate)
+pytest tests/test_phase2_classification.py -v # 23 tests for Phase 2 (issue ID, complexity, jurisdiction)
+pytest tests/test_safety_gate.py tests/test_phase2_classification.py -v  # All adaptive agent tests (39 total)
+```
+
+### Enabling Adaptive Graph (Future)
+Once complete, enable via environment variable:
+```bash
+USE_ADAPTIVE_GRAPH=true python main.py
+```
+
+### Reference Documents
+- `agent.md` - Detailed workflow design document (user's research on real lawyer consultation flow)
+- `/Users/kevin/.claude/plans/humble-chasing-bumblebee.md` - Full implementation plan
