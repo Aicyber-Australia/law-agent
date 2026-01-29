@@ -109,14 +109,28 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(RateLimitMiddleware)
 
-# Build the adaptive graph (handles both simple and complex queries via routing)
-from app.agents.adaptive_graph import get_adaptive_graph
-graph = get_adaptive_graph()
-agent_description = (
-    "Australian Legal Assistant with adaptive depth analysis - "
-    "provides comprehensive legal research, risk analysis, strategy recommendations, "
-    "and structured lawyer handoff briefs"
-)
+# Choose graph based on environment variable
+# USE_ADAPTIVE_GRAPH=true uses the old multi-stage pipeline
+# Default (false) uses the new conversational mode
+USE_ADAPTIVE_GRAPH = os.environ.get("USE_ADAPTIVE_GRAPH", "false").lower() == "true"
+
+if USE_ADAPTIVE_GRAPH:
+    from app.agents.adaptive_graph import get_adaptive_graph
+    graph = get_adaptive_graph()
+    agent_description = (
+        "Australian Legal Assistant with adaptive depth analysis - "
+        "provides comprehensive legal research, risk analysis, strategy recommendations, "
+        "and structured lawyer handoff briefs"
+    )
+    logger.info("Using ADAPTIVE graph (multi-stage pipeline)")
+else:
+    from app.agents.conversational_graph import get_conversational_graph
+    graph = get_conversational_graph()
+    agent_description = (
+        "Australian Legal Assistant - natural conversational help with "
+        "legal questions, rights information, and lawyer referrals"
+    )
+    logger.info("Using CONVERSATIONAL graph (fast, natural chat)")
 
 # Integrate with CopilotKit (using LangGraphAGUIAgent)
 add_langgraph_fastapi_endpoint(

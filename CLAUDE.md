@@ -106,7 +106,12 @@ The `lookup_law` tool uses a hybrid retrieval pipeline:
 The agent uses a **custom StateGraph** (not `create_react_agent`) to properly read frontend context:
 - Frontend uses `useCopilotReadable` to share user's selected state and uploaded document URL
 - Backend inherits from `CopilotKitState` and reads `state["copilotkit"]["context"]`
-- **Important**: AG-UI protocol double-serializes string values. Use `clean_context_value()` in main.py to strip extra quotes and unescape inner quotes.
+
+**CopilotKit/AG-UI Bug Workaround**: The AG-UI protocol double-serializes string values, causing context values to arrive with extra quotes (e.g., `"\"NSW\""` instead of `"NSW"`). The `clean_context_value()` function in both `adaptive_graph.py` and `conversational_graph.py` handles this by:
+1. Stripping outer quotes if value starts and ends with `"`
+2. Unescaping inner quotes (`\"` → `"`)
+
+This bug affects both `emit-messages` config keys (must set both `copilotkit:emit-messages` and `emit-messages`) and context string values.
 
 ### State-Based Legal Information
 Australian law varies by state. The `StateSelector` component lets users pick their state (VIC, NSW, QLD, etc.), which is passed to all tool calls automatically. For unsupported states (VIC, SA, WA, TAS, NT), the system falls back to Federal law.
@@ -122,17 +127,33 @@ Files are uploaded to Supabase Storage (not backend memory) for persistence:
 
 ```
 backend/
-├── main.py                 # FastAPI app, custom LangGraph, CopilotKit integration
+├── main.py                 # FastAPI app, graph selection (conversational vs adaptive)
 ├── pytest.ini              # Pytest configuration
 ├── app/
 │   ├── config.py           # Environment variables, logging
 │   ├── db/supabase_client.py
+│   ├── agents/
+│   │   ├── conversational_state.py   # Simple state for chat mode
+│   │   ├── conversational_graph.py   # Fast 3-node conversational graph (DEFAULT)
+│   │   ├── adaptive_state.py         # Complex state for adaptive mode
+│   │   ├── adaptive_graph.py         # 14-node adaptive pipeline
+│   │   ├── stages/
+│   │   │   ├── safety_check_lite.py  # Fast keyword-first safety check
+│   │   │   ├── chat_response.py      # ReAct agent with tools + quick replies
+│   │   │   ├── safety_gate.py        # Full LLM safety check (adaptive mode)
+│   │   │   └── ...                   # Other adaptive stages
+│   │   ├── routers/
+│   │   │   ├── safety_router.py      # LLM-based safety classification
+│   │   │   └── complexity_router.py  # Simple/complex path routing
+│   │   └── schemas/
+│   │       ├── emergency_resources.py # Crisis hotlines by state
+│   │       └── ...
 │   ├── services/           # RAG services
 │   │   ├── embedding_service.py   # OpenAI text-embedding-3-small
 │   │   ├── hybrid_retriever.py    # Vector + FTS + RRF fusion
 │   │   └── reranker.py            # Cohere reranker (optional)
 │   ├── tools/
-│   │   ├── lookup_law.py       # RAG-based legal search
+│   │   ├── lookup_law.py       # RAG-based legal search (ALWAYS use for legal refs)
 │   │   ├── find_lawyer.py      # Filter by location/specialty
 │   │   ├── generate_checklist.py  # LLM-generated or template-based
 │   │   └── analyze_document.py # Fetch & parse docs for agent analysis
@@ -140,9 +161,11 @@ backend/
 │       ├── document_parser.py  # PDF, DOCX, image parsing
 │       └── url_fetcher.py      # Fetch documents from URLs
 ├── tests/
-│   ├── conftest.py         # Shared fixtures
-│   ├── test_url_fetcher.py # SSRF protection tests
-│   └── test_lookup_law.py  # RAG tool tests
+│   ├── conftest.py              # Shared fixtures
+│   ├── test_conversational_mode.py  # Conversational graph tests (15 tests)
+│   ├── test_safety_gate.py      # Safety gate tests (16 tests)
+│   ├── test_url_fetcher.py      # SSRF protection tests
+│   └── test_lookup_law.py       # RAG tool tests
 ├── scripts/
 │   ├── ingest_corpus.py    # Hugging Face dataset ingestion (batch inserts)
 │   └── eval_rag.py         # RAG retrieval quality evaluation
@@ -322,3 +345,77 @@ USE_ADAPTIVE_GRAPH=true python main.py
 ### Reference Documents
 - `agent.md` - Detailed workflow design document (user's research on real lawyer consultation flow)
 - `/Users/kevin/.claude/plans/humble-chasing-bumblebee.md` - Full implementation plan
+
+---
+
+## Conversational Mode (Default)
+
+### Overview
+The **conversational mode** is now the default agent behavior. It provides fast, natural conversation instead of the multi-stage analysis pipeline. Users can still access the adaptive workflow by setting `USE_ADAPTIVE_GRAPH=true`.
+
+### Why Conversational Mode?
+- **Performance**: 1-2 LLM calls vs 6-11 in adaptive mode
+- **Natural UX**: Chat flows like talking to a helpful friend, not a rigid pipeline
+- **User Control**: Deep analysis and lawyer briefs only when explicitly requested
+- **Quick Replies**: Suggested follow-up options for smoother conversation
+
+### Architecture
+```
+┌─────────────────────────────────────────────────────────────┐
+│  CONVERSATIONAL MODE (default)                              │
+│                                                             │
+│  initialize → safety_check_lite → chat_response → END      │
+│                      │                                      │
+│                      ↓ (if crisis)                         │
+│              escalation_response → END                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### File Structure (Conversational Mode)
+```
+backend/app/agents/
+├── conversational_state.py      # Simplified state for chat mode
+├── conversational_graph.py      # Fast 3-node graph
+└── stages/
+    ├── safety_check_lite.py     # Keyword-first safety (LLM fallback only when uncertain)
+    └── chat_response.py         # ReAct agent with tools + quick replies
+```
+
+### Key Features
+
+**1. Fast Safety Check (`safety_check_lite.py`)**
+- Keyword detection first (no LLM for obvious cases)
+- Falls back to LLM only for uncertain queries
+- Skips safety check entirely for short follow-up messages
+
+**2. Natural Chat Response (`chat_response.py`)**
+- Uses ReAct agent pattern with tools (`lookup_law`, `find_lawyer`)
+- Generates conversational responses, not structured analysis
+- Produces 2-4 quick reply suggestions after each response
+- **Critical**: Always uses `lookup_law` tool for legal references, never web search
+
+**3. Quick Replies**
+After each response, the agent suggests follow-up options like:
+- "What are my options?"
+- "Tell me more"
+- "Find me a lawyer"
+- "What happens next?"
+
+### Tool Usage Guidelines (Conversational Mode)
+- **`lookup_law`**: ALWAYS use for specific laws, legislation, or legal requirements
+- **`find_lawyer`**: Use when user asks for lawyer recommendations
+- **NEVER use web search** for legal information - only use the local legislation database
+
+### Testing Conversational Mode
+```bash
+pytest tests/test_conversational_mode.py -v  # 15 tests
+```
+
+### Switching Between Modes
+```bash
+# Conversational mode (default)
+python main.py
+
+# Adaptive mode (multi-stage pipeline)
+USE_ADAPTIVE_GRAPH=true python main.py
+```
