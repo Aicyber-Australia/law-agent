@@ -3,11 +3,14 @@
 This is a simpler, faster alternative to the adaptive graph.
 Focuses on natural conversation with tools, not multi-stage pipelines.
 
-Flow:
+Flow (chat mode):
     initialize -> safety_check -> chat_response -> END
                       |
                       v (if crisis)
               escalation_response -> END
+
+Flow (brief mode - triggered by user):
+    initialize -> brief_check_info -> [brief_ask_questions | brief_generate] -> END
 """
 
 import re
@@ -26,7 +29,16 @@ from app.agents.stages.safety_check_lite import (
     format_escalation_response_lite,
 )
 from app.agents.stages.chat_response import chat_response_node
+from app.agents.stages.brief_flow import (
+    brief_check_info_node,
+    brief_ask_questions_node,
+    brief_generate_node,
+)
 from app.config import logger
+
+
+# Brief generation trigger marker (sent from frontend)
+BRIEF_TRIGGER = "[GENERATE_BRIEF]"
 
 
 # ============================================
@@ -105,6 +117,7 @@ async def initialize_node(state: ConversationalState) -> dict:
     Initialize state with session ID, extract query and CopilotKit context.
 
     This is lightweight - just extracts what we need for conversation.
+    Also detects brief generation trigger from frontend.
     """
     messages = state.get("messages", [])
     current_query = ""
@@ -124,10 +137,17 @@ async def initialize_node(state: ConversationalState) -> dict:
     # Check if this is the first message (new session)
     is_first_message = len(messages) <= 1
 
+    # Check for brief generation trigger
+    is_brief_mode = BRIEF_TRIGGER in current_query
+    if is_brief_mode:
+        # Clean the trigger from the query
+        current_query = current_query.replace(BRIEF_TRIGGER, "").strip()
+
     logger.info(
         f"Conversational init: session={session_id[:8]}, "
         f"query_length={len(current_query)}, user_state={user_state}, "
-        f"has_document={bool(uploaded_document_url)}, first_msg={is_first_message}"
+        f"has_document={bool(uploaded_document_url)}, first_msg={is_first_message}, "
+        f"brief_mode={is_brief_mode}"
     )
 
     return {
@@ -136,17 +156,22 @@ async def initialize_node(state: ConversationalState) -> dict:
         "user_state": user_state,
         "uploaded_document_url": uploaded_document_url,
         "is_first_message": is_first_message,
-        "mode": "chat",  # Default to chat mode
+        "mode": "brief" if is_brief_mode else "chat",
     }
 
 
-def should_check_safety(state: ConversationalState) -> Literal["check", "skip"]:
+def route_after_initialize(state: ConversationalState) -> Literal["brief", "check", "skip"]:
     """
-    Determine if we should run safety check.
+    Route based on mode after initialization.
 
-    Run safety on first message or if query might be risky.
-    Skip for simple follow-ups to speed up response.
+    - brief: User triggered brief generation
+    - check: Run safety check (first message or risky content)
+    - skip: Skip safety, go directly to chat
     """
+    # Brief mode bypasses normal flow
+    if state.get("mode") == "brief":
+        return "brief"
+
     # Always check on first message
     if state.get("is_first_message", True):
         return "check"
@@ -162,6 +187,25 @@ def should_check_safety(state: ConversationalState) -> Literal["check", "skip"]:
     return "check"
 
 
+def route_brief_info(state: ConversationalState) -> Literal["generate", "ask"]:
+    """
+    Route based on whether we have enough info for the brief.
+
+    - generate: We have enough info, generate the brief
+    - ask: Need more info, ask follow-up questions
+    """
+    # If info is complete, generate brief
+    if state.get("brief_info_complete", False):
+        return "generate"
+
+    # If we've asked too many questions (max 3 rounds), generate anyway
+    if state.get("brief_questions_asked", 0) >= 3:
+        return "generate"
+
+    # Otherwise, ask more questions
+    return "ask"
+
+
 # ============================================
 # Graph Definition
 # ============================================
@@ -170,28 +214,39 @@ def build_conversational_graph():
     """
     Build the conversational legal assistant graph.
 
-    Simple flow:
+    Chat flow:
     - Initialize (extract context)
     - Safety check (lightweight, skippable for follow-ups)
     - Chat response (natural conversation with tools)
+
+    Brief flow (user-triggered):
+    - Initialize (detect brief trigger)
+    - Brief check info (extract facts, find gaps)
+    - Brief ask questions (if info missing) or Brief generate (if ready)
     """
     # Output schema limits what gets streamed to UI
     workflow = StateGraph(ConversationalState, output=ConversationalOutput)
 
-    # Add nodes
+    # Add chat mode nodes
     workflow.add_node("initialize", initialize_node)
     workflow.add_node("safety_check", safety_check_lite_node)
     workflow.add_node("escalation_response", format_escalation_response_lite)
     workflow.add_node("chat_response", chat_response_node)
 
+    # Add brief mode nodes
+    workflow.add_node("brief_check_info", brief_check_info_node)
+    workflow.add_node("brief_ask_questions", brief_ask_questions_node)
+    workflow.add_node("brief_generate", brief_generate_node)
+
     # Entry point
     workflow.set_entry_point("initialize")
 
-    # After initialize, optionally check safety
+    # After initialize, route based on mode
     workflow.add_conditional_edges(
         "initialize",
-        should_check_safety,
+        route_after_initialize,
         {
+            "brief": "brief_check_info",
             "check": "safety_check",
             "skip": "chat_response",
         }
@@ -207,9 +262,21 @@ def build_conversational_graph():
         }
     )
 
+    # Brief mode routing
+    workflow.add_conditional_edges(
+        "brief_check_info",
+        route_brief_info,
+        {
+            "generate": "brief_generate",
+            "ask": "brief_ask_questions",
+        }
+    )
+
     # Terminal nodes
     workflow.add_edge("escalation_response", END)
     workflow.add_edge("chat_response", END)
+    workflow.add_edge("brief_ask_questions", END)  # Wait for user response
+    workflow.add_edge("brief_generate", END)
 
     return workflow
 

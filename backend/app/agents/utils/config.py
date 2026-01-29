@@ -19,6 +19,33 @@ from langchain_core.runnables import RunnableConfig
 from copilotkit.langgraph import copilotkit_customize_config
 
 
+def get_chat_agent_config(config: Optional[RunnableConfig] = None) -> RunnableConfig:
+    """
+    Get a config for the chat agent that hides tool calls but keeps message streaming.
+
+    This allows the final response to stream naturally while hiding intermediate
+    tool call events (which can be confusing when they appear then disappear).
+
+    Args:
+        config: The current LangGraph config from the node.
+
+    Returns:
+        A customized RunnableConfig with emit_messages=True and emit_tool_calls=False.
+    """
+    customized = copilotkit_customize_config(
+        config,
+        emit_messages=True,
+        emit_tool_calls=False,
+    )
+
+    if customized.get("metadata") is None:
+        customized["metadata"] = {}
+    customized["metadata"]["emit-messages"] = True
+    customized["metadata"]["emit-tool-calls"] = False
+
+    return customized
+
+
 def get_internal_llm_config(config: Optional[RunnableConfig] = None) -> RunnableConfig:
     """
     Get a config for internal LLM calls that suppresses streaming to the frontend.

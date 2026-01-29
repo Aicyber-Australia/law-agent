@@ -12,7 +12,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.prebuilt import create_react_agent
 
 from app.agents.conversational_state import ConversationalState
-from app.agents.utils import get_internal_llm_config
+from app.agents.utils import get_internal_llm_config, get_chat_agent_config
 from app.tools.lookup_law import lookup_law
 from app.tools.find_lawyer import find_lawyer
 from app.config import logger
@@ -186,10 +186,14 @@ async def chat_response_node(
         # Create agent with tools
         agent = _create_chat_agent(user_state, has_document)
 
+        # Use config that hides tool calls but keeps message streaming
+        # This prevents confusing UX where tool calls appear then disappear
+        chat_config = get_chat_agent_config(config)
+
         # Run agent
         result = await agent.ainvoke(
             {"messages": messages},
-            config=config,
+            config=chat_config,
         )
 
         # Extract the final response

@@ -140,6 +140,32 @@ async def my_node(state: State, config: RunnableConfig) -> dict:
 - The main chat response (should stream to user)
 - Tool results that the user should see
 
+### Hiding Tool Calls While Keeping Message Streaming
+
+**Problem**: When using ReAct agents with tools (like `lookup_law`), the AG-UI protocol streams tool call events to the frontend. These appear as content, then disappear when the final response arrives - confusing UX.
+
+**Solution**: Use `get_chat_agent_config(config)` for ReAct agent calls. This sets:
+- `emit-messages: true` (keep response streaming)
+- `emit-tool-calls: false` (hide tool call events)
+
+```python
+from app.agents.utils import get_chat_agent_config
+
+async def chat_response_node(state, config):
+    agent = create_react_agent(llm, tools, prompt=system)
+
+    # Hide tool calls but keep message streaming
+    chat_config = get_chat_agent_config(config)
+    result = await agent.ainvoke({"messages": messages}, config=chat_config)
+```
+
+**Summary of config helpers**:
+| Helper | emit-messages | emit-tool-calls | Use for |
+|--------|---------------|-----------------|---------|
+| `get_internal_llm_config` | False | False | Internal LLM calls (safety, quick replies) |
+| `get_chat_agent_config` | True | False | ReAct agents with tools |
+| (default config) | True | True | Simple LLM calls without tools |
+
 ### State-Based Legal Information
 Australian law varies by state. The `StateSelector` component lets users pick their state (VIC, NSW, QLD, etc.), which is passed to all tool calls automatically. For unsupported states (VIC, SA, WA, TAS, NT), the system falls back to Federal law.
 
@@ -457,7 +483,7 @@ USE_ADAPTIVE_GRAPH=true python main.py
 |-------|--------|-------------|
 | **Phase 1** | ✅ Complete | Basic conversational mode (fast graph, safety check, chat response) |
 | **Phase 2** | ✅ Complete | Quick replies (backend generation, frontend display via useCoAgent) |
-| **Phase 3** | ⏳ Not Started | Brief generation mode (user-triggered, info gathering, comprehensive brief) |
+| **Phase 3** | ✅ Complete | Brief generation mode (user-triggered, info gathering, comprehensive brief) |
 
 ### Phase 2 Implementation Details (Quick Replies)
 
@@ -475,7 +501,7 @@ USE_ADAPTIVE_GRAPH=true python main.py
 
 ---
 
-## Phase 3: Brief Generation Mode (TODO)
+## Phase 3: Brief Generation Mode (Complete)
 
 ### Overview
 User-triggered brief generation that analyzes conversation history, asks follow-up questions if info is missing, then generates a comprehensive lawyer brief.
@@ -496,7 +522,7 @@ USER CLICKS "Generate Brief" BUTTON
 │  [2] If missing critical info:              │
 │      → Ask targeted questions               │
 │      → Wait for user responses              │
-│      → Loop until sufficient                │
+│      → Loop until sufficient (max 3 rounds) │
 │                                             │
 │  [3] When ready:                            │
 │      → Generate comprehensive brief         │
@@ -506,186 +532,44 @@ USER CLICKS "Generate Brief" BUTTON
 └─────────────────────────────────────────────┘
 ```
 
-### Implementation Steps
+### Implementation Details
 
-#### Step 3.1: Add State Fields for Brief Mode
+**Backend** (`brief_flow.py`):
+- `brief_check_info_node`: Extracts facts from conversation using GPT-4o with structured output (`ExtractedFacts` schema)
+- `brief_ask_questions_node`: Generates 1-3 targeted follow-up questions if info gaps exist (max 3 rounds)
+- `brief_generate_node`: Creates comprehensive `ConversationalBrief` with executive summary, facts, parties, evidence, questions for lawyer
+- Uses `get_internal_llm_config(config)` to suppress streaming for all internal LLM calls
 
-**Modify** `conversational_state.py`:
-```python
-class ConversationalState(TypedDict):
-    # ... existing fields ...
+**Graph Flow** (`conversational_graph.py`):
+- `BRIEF_TRIGGER = "[GENERATE_BRIEF]"` marker detected in initialize node
+- Routes to `brief_check_info` → `brief_ask_questions` (loop) or `brief_generate` → END
+- `route_brief_info()` decides: generate if complete OR after 3 question rounds
 
-    # Brief generation state (only used in brief mode)
-    brief_facts_collected: Optional[dict]      # Facts gathered from conversation
-    brief_missing_info: Optional[list[str]]    # What we still need
-    brief_info_complete: bool                  # Ready to generate?
-    brief_questions_asked: int                 # Track question count (max 3 rounds)
-```
+**Frontend** (`chat/page.tsx`):
+- `GenerateBriefButton` component in sidebar under "Lawyer Brief" card
+- Sends `[GENERATE_BRIEF]` marker via `appendMessage()` when clicked
+- Button styled with sky-600 color to stand out
 
-#### Step 3.2: Create Brief Generation Nodes
+**Brief Output Format**:
+- Markdown formatted with sections: Summary, Urgency, Situation, Key Facts, Parties, Documents, Goals, Questions for Lawyer
+- Urgency indicators: 🔴 Urgent, 🟡 Standard, 🟢 Low Priority
+- Quick replies after brief: "Find me a lawyer", "What should I ask the lawyer?", "Explain the urgency"
 
-**Create** `backend/app/agents/stages/brief_flow.py`:
-
-```python
-async def brief_check_info_node(state: ConversationalState, config: RunnableConfig) -> dict:
-    """Analyze conversation to determine what info we have and need."""
-    messages = state.get("messages", [])
-
-    # Use LLM to extract facts from conversation
-    facts = await extract_facts_from_conversation(messages, config)
-
-    # Determine legal area and required info
-    legal_area = facts.get("legal_area", "general")
-    required = get_required_info_for_brief(legal_area)
-
-    # Find gaps
-    missing = [r for r in required if r not in facts]
-
-    return {
-        "brief_facts_collected": facts,
-        "brief_missing_info": missing,
-        "brief_info_complete": len(missing) == 0
-    }
-
-async def brief_ask_questions_node(state: ConversationalState, config: RunnableConfig) -> dict:
-    """Ask targeted questions to fill info gaps."""
-    missing = state.get("brief_missing_info", [])
-    questions_asked = state.get("brief_questions_asked", 0)
-
-    # Generate natural questions for missing info (max 2 at a time)
-    questions = await generate_questions_for_missing(missing[:2], config)
-
-    return {
-        "messages": [AIMessage(content=questions)],
-        "brief_questions_asked": questions_asked + 1
-    }
-
-async def brief_generate_node(state: ConversationalState, config: RunnableConfig) -> dict:
-    """Generate the comprehensive lawyer brief."""
-    facts = state.get("brief_facts_collected", {})
-    messages = state.get("messages", [])
-    user_state = state.get("user_state")
-
-    brief = await generate_comprehensive_brief(facts, messages, user_state, config)
-
-    return {
-        "messages": [AIMessage(content=format_brief(brief))],
-        "mode": "chat"  # Return to chat mode after brief
-    }
-```
-
-#### Step 3.3: Update Graph with Brief Mode Routing
-
-**Modify** `conversational_graph.py`:
-
-```python
-def route_after_chat(state: ConversationalState) -> str:
-    """Route based on mode."""
-    if state.get("mode") == "brief":
-        return "brief_check_info"
-    return END
-
-def route_brief_info(state: ConversationalState) -> str:
-    """Route based on whether we have enough info."""
-    if state.get("brief_info_complete"):
-        return "brief_generate"
-    if state.get("brief_questions_asked", 0) >= 3:
-        return "brief_generate"  # Max 3 rounds of questions
-    return "brief_ask_questions"
-
-# Add nodes
-graph.add_node("brief_check_info", brief_check_info_node)
-graph.add_node("brief_ask_questions", brief_ask_questions_node)
-graph.add_node("brief_generate", brief_generate_node)
-
-# Add edges
-graph.add_conditional_edges("chat_response", route_after_chat, {
-    "brief_check_info": "brief_check_info",
-    END: END
-})
-graph.add_conditional_edges("brief_check_info", route_brief_info, {
-    "brief_generate": "brief_generate",
-    "brief_ask_questions": "brief_ask_questions"
-})
-graph.add_edge("brief_ask_questions", END)  # Wait for user response
-graph.add_edge("brief_generate", END)
-```
-
-#### Step 3.4: Add Frontend "Generate Brief" Button
-
-**Modify** `frontend/app/chat/page.tsx`:
-
-```tsx
-// Add to SidebarContent or bottom of chat
-<Card className="border-sky-200 bg-sky-50/50">
-  <CardHeader className="pb-2">
-    <CardTitle className="text-base font-medium flex items-center gap-2">
-      <FileText className="h-4 w-4 text-sky-700" />
-      Lawyer Brief
-    </CardTitle>
-    <CardDescription>
-      Generate a summary to share with a solicitor
-    </CardDescription>
-  </CardHeader>
-  <CardContent>
-    <Button
-      onClick={handleGenerateBrief}
-      className="w-full"
-      disabled={!hasConversation}
-    >
-      Generate Brief
-    </Button>
-  </CardContent>
-</Card>
-
-// Handler
-const handleGenerateBrief = async () => {
-  await appendMessage(
-    new TextMessage({
-      role: MessageRole.User,
-      content: "[GENERATE_BRIEF] Please prepare a lawyer brief based on our conversation.",
-    })
-  );
-};
-```
-
-#### Step 3.5: Detect Brief Trigger in Initialize
-
-**Modify** `conversational_graph.py` initialize node:
-
-```python
-def initialize_node(state: ConversationalState, config: RunnableConfig) -> dict:
-    # ... existing code ...
-
-    # Check for brief generation trigger
-    is_brief_mode = "[GENERATE_BRIEF]" in current_query
-
-    return {
-        # ... existing fields ...
-        "mode": "brief" if is_brief_mode else "chat",
-        "current_query": current_query.replace("[GENERATE_BRIEF]", "").strip(),
-    }
-```
-
-### Testing Plan
+### Testing
 
 ```bash
-# Unit tests for brief mode
+# Run brief generation tests (24 tests)
 pytest tests/test_brief_generation.py -v
 
-# Manual testing
-1. Have a conversation about a legal issue
-2. Click "Generate Brief" button
-3. Answer any follow-up questions
-4. Verify brief is generated with facts, issues, risks
+# Run all conversational mode tests (40 tests total)
+pytest tests/test_brief_generation.py tests/test_conversational_mode.py -v
 ```
 
-### Files to Create/Modify
+### Files Modified/Created
 
 | File | Action | Description |
 |------|--------|-------------|
-| `backend/app/agents/stages/brief_flow.py` | Create | Brief generation nodes |
-| `backend/app/agents/conversational_state.py` | Modify | Add brief state fields |
-| `backend/app/agents/conversational_graph.py` | Modify | Add brief routing & nodes |
-| `frontend/app/chat/page.tsx` | Modify | Add "Generate Brief" button |
-| `backend/tests/test_brief_generation.py` | Create | Tests for brief mode |
+| `backend/app/agents/stages/brief_flow.py` | Created | Brief generation nodes with ExtractedFacts, ConversationalBrief schemas |
+| `backend/app/agents/conversational_graph.py` | Modified | Added brief routing, BRIEF_TRIGGER constant, route_brief_info() |
+| `frontend/app/chat/page.tsx` | Modified | Added GenerateBriefButton component in sidebar |
+| `backend/tests/test_brief_generation.py` | Created | 24 tests for brief mode |

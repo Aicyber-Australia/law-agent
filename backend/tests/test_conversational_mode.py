@@ -7,7 +7,7 @@ from app.agents.conversational_state import ConversationalState
 from app.agents.conversational_graph import (
     get_conversational_graph,
     extract_user_state_from_context,
-    should_check_safety,
+    route_after_initialize,
 )
 from app.agents.stages.safety_check_lite import (
     _check_crisis_keywords,
@@ -57,8 +57,8 @@ class TestRiskyKeywordDetection:
         assert _might_be_risky("What are tenant rights?") is False
 
 
-class TestShouldCheckSafety:
-    """Test the safety check routing logic."""
+class TestRouteAfterInitialize:
+    """Test the routing logic after initialization."""
 
     def test_first_message_always_checks(self):
         state: ConversationalState = {
@@ -81,7 +81,7 @@ class TestShouldCheckSafety:
             "copilotkit": None,
             "error": None,
         }
-        assert should_check_safety(state) == "check"
+        assert route_after_initialize(state) == "check"
 
     def test_short_follow_up_skips(self):
         state: ConversationalState = {
@@ -104,7 +104,7 @@ class TestShouldCheckSafety:
             "copilotkit": None,
             "error": None,
         }
-        assert should_check_safety(state) == "skip"
+        assert route_after_initialize(state) == "skip"
 
     def test_emergency_keyword_checks(self):
         state: ConversationalState = {
@@ -127,7 +127,30 @@ class TestShouldCheckSafety:
             "copilotkit": None,
             "error": None,
         }
-        assert should_check_safety(state) == "check"
+        assert route_after_initialize(state) == "check"
+
+    def test_brief_mode_routes_to_brief(self):
+        state: ConversationalState = {
+            "is_first_message": False,
+            "current_query": "Generate brief",
+            "messages": [],
+            "session_id": "test",
+            "user_state": None,
+            "uploaded_document_url": None,
+            "mode": "brief",
+            "quick_replies": None,
+            "suggest_brief": False,
+            "suggest_lawyer": False,
+            "safety_result": "unknown",
+            "crisis_resources": None,
+            "brief_facts_collected": None,
+            "brief_missing_info": None,
+            "brief_info_complete": False,
+            "brief_questions_asked": 0,
+            "copilotkit": None,
+            "error": None,
+        }
+        assert route_after_initialize(state) == "brief"
 
 
 class TestContextExtraction:
@@ -198,8 +221,12 @@ class TestConversationalGraphCompiles:
     def test_graph_has_expected_nodes(self):
         from app.agents.conversational_graph import build_conversational_graph
         workflow = build_conversational_graph()
-        # Check that the expected nodes exist in the graph
+        # Check that the expected chat mode nodes exist
         assert "initialize" in workflow.nodes
         assert "safety_check" in workflow.nodes
         assert "chat_response" in workflow.nodes
         assert "escalation_response" in workflow.nodes
+        # Check that brief mode nodes exist
+        assert "brief_check_info" in workflow.nodes
+        assert "brief_ask_questions" in workflow.nodes
+        assert "brief_generate" in workflow.nodes

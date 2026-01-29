@@ -39,6 +39,7 @@ import {
   ArrowLeft,
   Upload,
   MessageSquare,
+  FileText,
 } from "lucide-react";
 
 export default function ChatPage() {
@@ -187,6 +188,22 @@ export default function ChatPage() {
               text="I need a lawyer"
               onClose={() => setSidebarOpen(false)}
             />
+          </CardContent>
+        </Card>
+
+        {/* Generate Brief */}
+        <Card className="border-sky-200 bg-sky-50/50 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base font-medium flex items-center gap-2">
+              <FileText className="h-4 w-4 text-sky-700" />
+              Lawyer Brief
+            </CardTitle>
+            <CardDescription>
+              Generate a summary to share with a solicitor.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <GenerateBriefButton onClose={() => setSidebarOpen(false)} />
           </CardContent>
         </Card>
       </div>
@@ -358,5 +375,35 @@ function QuickRepliesPanel({ replies }: { replies: string[] }) {
         </Button>
       ))}
     </div>
+  );
+}
+
+/**
+ * GenerateBriefButton - Triggers lawyer brief generation from conversation history.
+ * Sends a special marker that the backend recognizes to enter brief mode.
+ */
+function GenerateBriefButton({ onClose }: { onClose?: () => void }) {
+  const { appendMessage, isLoading } = useCopilotChat();
+
+  const handleGenerateBrief = async () => {
+    await appendMessage(
+      new TextMessage({
+        role: MessageRole.User,
+        content:
+          "[GENERATE_BRIEF] Please prepare a lawyer brief based on our conversation.",
+      })
+    );
+    onClose?.();
+  };
+
+  return (
+    <Button
+      onClick={handleGenerateBrief}
+      disabled={isLoading}
+      className="w-full bg-sky-600 hover:bg-sky-700 text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+    >
+      <FileText className="h-4 w-4 mr-2" />
+      Generate Brief
+    </Button>
   );
 }
