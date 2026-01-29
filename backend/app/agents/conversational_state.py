@@ -56,9 +56,14 @@ class ConversationalState(TypedDict):
 
 
 class ConversationalOutput(TypedDict):
-    """Output schema - only these fields are streamed to UI.
+    """Output schema - these fields are streamed to UI via AG-UI protocol.
 
-    This prevents internal state from being shown as raw JSON.
+    This prevents internal state from being shown as raw JSON,
+    while still allowing quick_replies to be rendered in frontend
+    using useCoAgentStateRender hook.
     """
 
     messages: Annotated[list[BaseMessage], operator.add]
+    quick_replies: Optional[list[str]]  # Suggested follow-up responses
+    suggest_brief: bool  # Whether to highlight brief generation option
+    suggest_lawyer: bool  # Whether to suggest finding a lawyer
