@@ -45,8 +45,10 @@ class ConversationalState(TypedDict):
     # ---- Brief Generation (only used in brief mode) ----
     brief_facts_collected: Optional[dict]
     brief_missing_info: Optional[list[str]]
+    brief_unknown_info: Optional[list[str]]  # Info user explicitly doesn't know
     brief_info_complete: bool
     brief_questions_asked: int
+    brief_needs_full_intake: bool  # True if conversation was too short when brief triggered
 
     # ---- CopilotKit Integration ----
     copilotkit: Optional[dict]

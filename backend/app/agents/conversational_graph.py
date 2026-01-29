@@ -40,6 +40,9 @@ from app.config import logger
 # Brief generation trigger marker (sent from frontend)
 BRIEF_TRIGGER = "[GENERATE_BRIEF]"
 
+# Early generation trigger (user wants to generate with available info)
+GENERATE_NOW_TRIGGER = "[GENERATE_NOW]"
+
 
 # ============================================
 # CopilotKit Context Extraction
@@ -193,13 +196,24 @@ def route_brief_info(state: ConversationalState) -> Literal["generate", "ask"]:
 
     - generate: We have enough info, generate the brief
     - ask: Need more info, ask follow-up questions
+
+    No arbitrary question limit - keep asking until:
+    - brief_info_complete is True (all critical info gathered)
+    - User explicitly requests early generation via GENERATE_NOW_TRIGGER
+    - No more missing info remains (including items marked as unknown)
     """
     # If info is complete, generate brief
     if state.get("brief_info_complete", False):
         return "generate"
 
-    # If we've asked too many questions (max 3 rounds), generate anyway
-    if state.get("brief_questions_asked", 0) >= 3:
+    # Check if user requested early generation
+    current_query = state.get("current_query", "")
+    if GENERATE_NOW_TRIGGER in current_query:
+        return "generate"
+
+    # Check if no more missing info (all either answered or marked unknown)
+    missing_info = state.get("brief_missing_info", [])
+    if not missing_info:
         return "generate"
 
     # Otherwise, ask more questions

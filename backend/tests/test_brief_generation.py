@@ -18,6 +18,8 @@ from app.agents.stages.brief_flow import (
     _format_conversation,
     _format_facts_for_prompt,
     _format_brief_as_message,
+    _detect_skip_response,
+    _detect_generate_now,
     ExtractedFacts,
     ConversationalBrief,
 )
@@ -40,8 +42,10 @@ def _create_test_state(**overrides) -> ConversationalState:
         "crisis_resources": None,
         "brief_facts_collected": None,
         "brief_missing_info": None,
+        "brief_unknown_info": None,
         "brief_info_complete": False,
         "brief_questions_asked": 0,
+        "brief_needs_full_intake": False,
         "copilotkit": None,
         "error": None,
     }
@@ -84,11 +88,20 @@ class TestBriefInfoRouting:
         state = _create_test_state(brief_info_complete=True)
         assert route_brief_info(state) == "generate"
 
-    def test_route_to_generate_after_max_questions(self):
-        """Route to generate after max question rounds."""
+    def test_route_to_generate_on_early_request(self):
+        """Route to generate when user requests via GENERATE_NOW_TRIGGER."""
         state = _create_test_state(
             brief_info_complete=False,
-            brief_questions_asked=3
+            brief_missing_info=["some info"],
+            current_query="[GENERATE_NOW] Just generate it",
+        )
+        assert route_brief_info(state) == "generate"
+
+    def test_route_to_generate_when_no_missing_info(self):
+        """Route to generate when missing_info is empty."""
+        state = _create_test_state(
+            brief_info_complete=False,
+            brief_missing_info=[],  # All answered or marked unknown
         )
         assert route_brief_info(state) == "generate"
 
@@ -96,17 +109,59 @@ class TestBriefInfoRouting:
         """Route to ask questions when info is incomplete."""
         state = _create_test_state(
             brief_info_complete=False,
+            brief_missing_info=["something"],
             brief_questions_asked=0
         )
         assert route_brief_info(state) == "ask"
 
-    def test_route_to_ask_after_one_round(self):
-        """Still ask after first round if incomplete."""
+    def test_route_to_ask_after_many_rounds(self):
+        """No question limit - keep asking if info still missing."""
         state = _create_test_state(
             brief_info_complete=False,
-            brief_questions_asked=1
+            brief_missing_info=["still need this"],
+            brief_questions_asked=10  # Even after many rounds
         )
         assert route_brief_info(state) == "ask"
+
+
+class TestSkipDetection:
+    """Test skip response detection helpers."""
+
+    def test_detect_skip_i_dont_know(self):
+        """Detect 'I don't know' as skip."""
+        assert _detect_skip_response("I don't know") is True
+
+    def test_detect_skip_not_sure(self):
+        """Detect 'not sure' as skip."""
+        assert _detect_skip_response("I'm not sure about that") is True
+
+    def test_detect_skip_skip(self):
+        """Detect 'skip' as skip."""
+        assert _detect_skip_response("skip") is True
+
+    def test_detect_skip_unsure(self):
+        """Detect 'unsure' as skip."""
+        assert _detect_skip_response("unsure") is True
+
+    def test_normal_response_not_skip(self):
+        """Normal response should not be detected as skip."""
+        assert _detect_skip_response("The lease was signed in January") is False
+
+    def test_empty_not_skip(self):
+        """Empty string should not be skip."""
+        assert _detect_skip_response("") is False
+
+    def test_detect_generate_now(self):
+        """Detect generate now request."""
+        assert _detect_generate_now("generate brief now") is True
+
+    def test_detect_generate_now_variation(self):
+        """Detect 'just generate' variation."""
+        assert _detect_generate_now("just generate it please") is True
+
+    def test_normal_not_generate_now(self):
+        """Normal response should not be generate now."""
+        assert _detect_generate_now("I want to continue") is False
 
 
 class TestFormatConversation:
@@ -211,6 +266,49 @@ class TestFormatBriefAsMessage:
         assert "Your Situation" in result
         assert "Key Facts" in result
         assert "Questions for Your Lawyer" in result
+
+    def test_format_brief_includes_unknown_info(self):
+        """Brief includes unknown info section when provided."""
+        brief = ConversationalBrief(
+            executive_summary="Test case",
+            legal_area="tenancy",
+            jurisdiction="NSW",
+            situation_narrative="Tenant dispute.",
+            key_facts=["Rent was increased"],
+            fact_gaps=[],
+            parties=["Tenant", "Landlord"],
+            documents_evidence=[],
+            client_goals=["Dispute the increase"],
+            potential_issues=["Excessive rent increase"],
+            questions_for_lawyer=["Is this legal?"],
+            urgency_level="standard",
+            urgency_reason="No immediate deadline",
+        )
+        unknown_info = ["Type of lease", "Exact date of rent increase"]
+        result = _format_brief_as_message(brief, "NSW", unknown_info)
+        assert "Information Not Provided" in result
+        assert "Type of lease" in result
+        assert "Exact date of rent increase" in result
+
+    def test_format_brief_no_unknown_section_when_empty(self):
+        """Brief omits unknown section when no unknown info."""
+        brief = ConversationalBrief(
+            executive_summary="Complete case",
+            legal_area="tenancy",
+            jurisdiction="NSW",
+            situation_narrative="All info provided.",
+            key_facts=["Fact 1"],
+            fact_gaps=[],
+            parties=["Tenant"],
+            documents_evidence=[],
+            client_goals=["Goal"],
+            potential_issues=["Issue"],
+            questions_for_lawyer=["Question"],
+            urgency_level="low_priority",
+            urgency_reason="No urgency",
+        )
+        result = _format_brief_as_message(brief, "NSW", unknown_info=[])
+        assert "Information Not Provided" not in result
 
 
 class TestGraphIncludesBriefNodes:

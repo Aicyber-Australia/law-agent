@@ -76,8 +76,10 @@ class TestRouteAfterInitialize:
             "crisis_resources": None,
             "brief_facts_collected": None,
             "brief_missing_info": None,
+            "brief_unknown_info": None,
             "brief_info_complete": False,
             "brief_questions_asked": 0,
+            "brief_needs_full_intake": False,
             "copilotkit": None,
             "error": None,
         }
@@ -99,8 +101,10 @@ class TestRouteAfterInitialize:
             "crisis_resources": None,
             "brief_facts_collected": None,
             "brief_missing_info": None,
+            "brief_unknown_info": None,
             "brief_info_complete": False,
             "brief_questions_asked": 0,
+            "brief_needs_full_intake": False,
             "copilotkit": None,
             "error": None,
         }
@@ -122,8 +126,10 @@ class TestRouteAfterInitialize:
             "crisis_resources": None,
             "brief_facts_collected": None,
             "brief_missing_info": None,
+            "brief_unknown_info": None,
             "brief_info_complete": False,
             "brief_questions_asked": 0,
+            "brief_needs_full_intake": False,
             "copilotkit": None,
             "error": None,
         }
@@ -145,8 +151,10 @@ class TestRouteAfterInitialize:
             "crisis_resources": None,
             "brief_facts_collected": None,
             "brief_missing_info": None,
+            "brief_unknown_info": None,
             "brief_info_complete": False,
             "brief_questions_asked": 0,
+            "brief_needs_full_intake": False,
             "copilotkit": None,
             "error": None,
         }
@@ -177,8 +185,10 @@ class TestContextExtraction:
             "crisis_resources": None,
             "brief_facts_collected": None,
             "brief_missing_info": None,
+            "brief_unknown_info": None,
             "brief_info_complete": False,
             "brief_questions_asked": 0,
+            "brief_needs_full_intake": False,
             "error": None,
         }
         assert extract_user_state_from_context(state) == "NSW"
@@ -204,8 +214,10 @@ class TestContextExtraction:
             "crisis_resources": None,
             "brief_facts_collected": None,
             "brief_missing_info": None,
+            "brief_unknown_info": None,
             "brief_info_complete": False,
             "brief_questions_asked": 0,
+            "brief_needs_full_intake": False,
             "error": None,
         }
         assert extract_user_state_from_context(state) == "VIC"

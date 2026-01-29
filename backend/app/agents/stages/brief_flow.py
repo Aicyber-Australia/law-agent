@@ -20,6 +20,44 @@ from app.config import logger
 
 
 # ============================================
+# Skip Response Detection
+# ============================================
+
+SKIP_PHRASES = [
+    "i don't know",
+    "i dont know",
+    "not sure",
+    "skip",
+    "i'm not certain",
+    "im not certain",
+    "no idea",
+    "unsure",
+    "don't know",
+    "dont know",
+    "can't remember",
+    "cant remember",
+    "not certain",
+]
+
+
+def _detect_skip_response(message: str) -> bool:
+    """Check if the user's message indicates they want to skip/don't know."""
+    if not message:
+        return False
+    message_lower = message.lower().strip()
+    return any(phrase in message_lower for phrase in SKIP_PHRASES)
+
+
+def _detect_generate_now(message: str) -> bool:
+    """Check if user wants to generate the brief immediately."""
+    if not message:
+        return False
+    message_lower = message.lower().strip()
+    generate_phrases = ["generate brief now", "generate now", "just generate", "skip all"]
+    return any(phrase in message_lower for phrase in generate_phrases)
+
+
+# ============================================
 # Schemas for LLM Structured Output
 # ============================================
 
@@ -271,23 +309,59 @@ async def brief_check_info_node(
     """
     Analyze conversation to extract facts and identify information gaps.
 
-    This is the first step when user triggers brief generation.
-    It reads the full conversation history and determines:
-    - What facts we have
-    - What's missing for a useful brief
-    - Whether we need to ask more questions
+    This node handles multiple scenarios:
+    1. Initial brief trigger - analyze conversation, identify gaps
+    2. User answered a question - re-analyze and update missing info
+    3. User said "I don't know" - move item to unknown, continue with next
+    4. User said "Generate now" - mark complete to generate with available info
+    5. Empty conversation - start full intake flow
 
     Args:
         state: Current conversation state
         config: LangGraph config
 
     Returns:
-        dict with brief_facts_collected, brief_missing_info, brief_info_complete
+        dict with brief_facts_collected, brief_missing_info, brief_unknown_info, brief_info_complete
     """
     messages = state.get("messages", [])
     user_state = state.get("user_state", "Not specified")
+    current_query = state.get("current_query", "")
+    existing_missing = state.get("brief_missing_info") or []
+    existing_unknown = state.get("brief_unknown_info") or []
 
     logger.info(f"Brief check: analyzing {len(messages)} messages")
+
+    # Check if user wants to generate immediately
+    if _detect_generate_now(current_query):
+        logger.info("User requested immediate brief generation")
+        return {
+            "brief_info_complete": True,
+        }
+
+    # Check if user said "I don't know" to the previous question
+    if _detect_skip_response(current_query) and existing_missing:
+        # Move the first missing item to unknown
+        skipped_item = existing_missing[0]
+        new_missing = existing_missing[1:]
+        new_unknown = existing_unknown + [skipped_item]
+
+        logger.info(f"User skipped question, moved '{skipped_item}' to unknown")
+
+        # If no more missing items, we're complete
+        is_complete = len(new_missing) == 0
+
+        return {
+            "brief_missing_info": new_missing,
+            "brief_unknown_info": new_unknown,
+            "brief_info_complete": is_complete,
+        }
+
+    # Count substantive messages (excluding brief trigger)
+    substantive_messages = [
+        m for m in messages
+        if isinstance(m, HumanMessage) and "[GENERATE_BRIEF]" not in m.content
+    ]
+    is_empty_conversation = len(substantive_messages) < 2
 
     # Format conversation for analysis
     conversation = _format_conversation(messages)
@@ -311,7 +385,7 @@ async def brief_check_info_node(
         missing_critical = facts.missing_critical_info
         has_enough_info = (
             facts.confidence >= 0.6
-            and len(missing_critical) <= 1
+            and len(missing_critical) == 0
             and facts.legal_area != "unknown"
             and len(facts.key_facts) >= 2
         )
@@ -319,13 +393,16 @@ async def brief_check_info_node(
         logger.info(
             f"Brief facts extracted: area={facts.legal_area}, "
             f"confidence={facts.confidence:.2f}, "
-            f"missing={len(missing_critical)}, complete={has_enough_info}"
+            f"missing={len(missing_critical)}, complete={has_enough_info}, "
+            f"empty_conversation={is_empty_conversation}"
         )
 
         return {
             "brief_facts_collected": facts.model_dump(),
             "brief_missing_info": missing_critical,
+            "brief_unknown_info": existing_unknown,  # Preserve unknown items
             "brief_info_complete": has_enough_info,
+            "brief_needs_full_intake": is_empty_conversation,
         }
 
     except Exception as e:
@@ -354,8 +431,9 @@ async def brief_ask_questions_node(
     """
     Ask targeted questions to fill information gaps.
 
-    Called when brief_info_complete is False and we haven't exceeded
-    the maximum question rounds.
+    Called when brief_info_complete is False. Continues asking until:
+    - All info gathered (or marked as unknown)
+    - User requests early generation
 
     Args:
         state: Current conversation state
@@ -367,8 +445,9 @@ async def brief_ask_questions_node(
     facts = state.get("brief_facts_collected", {})
     missing_info = state.get("brief_missing_info", [])
     questions_asked = state.get("brief_questions_asked", 0)
+    needs_full_intake = state.get("brief_needs_full_intake", False)
 
-    logger.info(f"Brief questions: round {questions_asked + 1}, missing={len(missing_info)}")
+    logger.info(f"Brief questions: round {questions_asked + 1}, missing={len(missing_info)}, full_intake={needs_full_intake}")
 
     try:
         # Use internal config to suppress streaming
@@ -386,14 +465,22 @@ async def brief_ask_questions_node(
         )
 
         # Format questions as natural message
-        question_text = f"Before I prepare your lawyer brief, I need a bit more information:\n\n"
+        if needs_full_intake and questions_asked == 0:
+            # First question with empty conversation - add friendly intro
+            question_text = (
+                "I don't have enough context yet to prepare a brief. "
+                "Let me ask you some questions about your legal situation.\n\n"
+            )
+        else:
+            question_text = "Before I prepare your lawyer brief, I need a bit more information:\n\n"
+
         for i, q in enumerate(result.questions, 1):
             question_text += f"{i}. {q}\n"
 
         return {
             "messages": [AIMessage(content=question_text)],
             "brief_questions_asked": questions_asked + 1,
-            "quick_replies": ["I don't know", "Let me explain", "Skip this"],
+            "quick_replies": ["I don't know", "Let me explain", "Generate brief now"],
         }
 
     except Exception as e:
@@ -426,8 +513,9 @@ async def brief_generate_node(
     messages = state.get("messages", [])
     user_state = state.get("user_state", "Not specified")
     facts = state.get("brief_facts_collected", {})
+    unknown_info = state.get("brief_unknown_info") or []
 
-    logger.info(f"Brief generation: creating comprehensive brief")
+    logger.info(f"Brief generation: creating comprehensive brief, unknown_items={len(unknown_info)}")
 
     # Format conversation and facts
     conversation = _format_conversation(messages)
@@ -449,8 +537,8 @@ async def brief_generate_node(
             config=internal_config,
         )
 
-        # Format brief as readable message
-        formatted_brief = _format_brief_as_message(brief, user_state)
+        # Format brief as readable message (include unknown items)
+        formatted_brief = _format_brief_as_message(brief, user_state, unknown_info)
 
         logger.info(
             f"Brief generated: area={brief.legal_area}, "
@@ -529,8 +617,18 @@ def _format_facts_for_prompt(facts: dict) -> str:
     return "\n".join(parts)
 
 
-def _format_brief_as_message(brief: ConversationalBrief, user_state: str) -> str:
-    """Format the brief as a readable chat message."""
+def _format_brief_as_message(
+    brief: ConversationalBrief,
+    user_state: str,
+    unknown_info: list[str] | None = None,
+) -> str:
+    """Format the brief as a readable chat message.
+
+    Args:
+        brief: The generated brief
+        user_state: User's Australian state/territory
+        unknown_info: Items the user explicitly said they don't know
+    """
     urgency_emoji = {
         "urgent": "🔴",
         "standard": "🟡",
@@ -576,6 +674,14 @@ def _format_brief_as_message(brief: ConversationalBrief, user_state: str) -> str
         lines.append("## Your Goals")
         for goal in brief.client_goals:
             lines.append(f"- {goal}")
+        lines.append("")
+
+    # Show items user explicitly said they don't know
+    if unknown_info:
+        lines.append("## Information Not Provided")
+        lines.append("*You indicated you don't know these details - the lawyer may need to discuss:*")
+        for item in unknown_info:
+            lines.append(f"- {item}")
         lines.append("")
 
     if brief.fact_gaps:
