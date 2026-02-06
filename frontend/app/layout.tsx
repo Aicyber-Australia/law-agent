@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { CopilotKit } from "@copilotkit/react-core";
 import "@copilotkit/react-ui/styles.css";
 import "./globals.css";
+import { ModeProvider } from "./contexts/ModeContext";
 
 export const metadata: Metadata = {
   title: "AusLaw AI",
@@ -17,11 +18,8 @@ export default function RootLayout({
     <html lang="en">
       <body>
         {/* Connect via Next.js API route to Python backend */}
-        <CopilotKit
-          runtimeUrl="/api/copilotkit"
-          agent="auslaw_agent"
-        >
-          {children}
+        <CopilotKit runtimeUrl="/api/copilotkit" agent="auslaw_agent">
+          <ModeProvider>{children}</ModeProvider>
         </CopilotKit>
       </body>
     </html>

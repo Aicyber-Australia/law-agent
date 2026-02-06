@@ -6,6 +6,7 @@ from .context import (
     clean_context_value,
     extract_user_state,
     extract_document_url,
+    extract_ui_mode,
 )
 
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     "clean_context_value",
     "extract_user_state",
     "extract_document_url",
+    "extract_ui_mode",
 ]

@@ -412,3 +412,117 @@
     @apply transition-all duration-200 ease-out;
   }
 }
+
+/* ============================================
+   Mode-based Theming
+   Chat Mode (default): Relaxing, casual
+   Analysis Mode: Professional, serious
+   ============================================ */
+
+/* Global transition for theme switching */
+[data-mode] {
+  transition: background-color 0.3s ease-out, border-color 0.3s ease-out;
+}
+
+/* Chat Mode (Default) - Relaxing & Casual */
+[data-mode="chat"] {
+  --copilot-kit-primary-color: #3b82f6;
+  --copilot-kit-background-color: #f8fafc;
+  --mode-bg: 210 40% 98%;
+  --mode-sidebar-bg: 0 0% 100%;
+  --mode-primary: 221 83% 53%;
+  --mode-accent: 38 92% 50%;
+}
+
+[data-mode="chat"] .copilotKitMessages {
+  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%) !important;
+}
+
+[data-mode="chat"] .copilotKitMessage.copilotKitUserMessage {
+  background: #3b82f6 !important;
+}
+
+[data-mode="chat"] .copilotKitMessage.copilotKitAssistantMessage {
+  background: #ffffff !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06) !important;
+}
+
+/* Analysis Mode - Professional & Serious */
+[data-mode="analysis"] {
+  --copilot-kit-primary-color: #1e3a5f;
+  --copilot-kit-background-color: #f1f5f9;
+  --mode-bg: 220 14% 96%;
+  --mode-sidebar-bg: 220 20% 97%;
+  --mode-primary: 222 47% 25%;
+  --mode-accent: 24 100% 50%;
+}
+
+[data-mode="analysis"] .chat-page-container {
+  background: #f1f5f9;
+}
+
+[data-mode="analysis"] .copilotKitMessages {
+  background: linear-gradient(180deg, #f1f5f9 0%, #f8fafc 100%) !important;
+}
+
+[data-mode="analysis"] .copilotKitMessage.copilotKitUserMessage {
+  background: #1e3a5f !important;
+}
+
+[data-mode="analysis"] .copilotKitMessage.copilotKitAssistantMessage {
+  background: #ffffff !important;
+  border: 1px solid #cbd5e1 !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08) !important;
+}
+
+[data-mode="analysis"] .copilotKitSendButton,
+[data-mode="analysis"] .copilotKitInput button[type="submit"] {
+  background: #1e3a5f !important;
+}
+
+[data-mode="analysis"] .copilotKitSendButton:hover,
+[data-mode="analysis"] .copilotKitInput button[type="submit"]:hover {
+  background: #172c47 !important;
+}
+
+[data-mode="analysis"] .copilotKitTextarea:focus,
+[data-mode="analysis"] .copilotKitInput textarea:focus {
+  border-color: #1e3a5f !important;
+  box-shadow: 0 0 0 3px rgba(30, 58, 95, 0.15) !important;
+}
+
+/* Analysis mode sidebar styling */
+[data-mode="analysis"] .sidebar-container {
+  background: #f8fafc;
+  border-right-color: #cbd5e1;
+}
+
+/* Analysis mode primary button colors */
+[data-mode="analysis"] .bg-primary {
+  background-color: #1e3a5f !important;
+}
+
+[data-mode="analysis"] .text-primary {
+  color: #1e3a5f !important;
+}
+
+[data-mode="analysis"] .border-primary {
+  border-color: #1e3a5f !important;
+}
+
+[data-mode="analysis"] .bg-primary\/10 {
+  background-color: rgba(30, 58, 95, 0.1) !important;
+}
+
+[data-mode="analysis"] .bg-primary\/5 {
+  background-color: rgba(30, 58, 95, 0.05) !important;
+}
+
+[data-mode="analysis"] .hover\:bg-primary\/90:hover {
+  background-color: rgba(30, 58, 95, 0.9) !important;
+}
+
+[data-mode="analysis"] .shadow-primary\/20 {
+  box-shadow: 0 1px 2px rgba(30, 58, 95, 0.2) !important;
+}

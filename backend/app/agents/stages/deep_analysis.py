@@ -128,7 +128,7 @@ async def analysis_response_node(state: ConversationalState, config: RunnableCon
     Presents findings in a friendly, readable format rather than
     a formal legal document.
 
-    Uses copilotkit_emit_message to avoid duplicate message issue.
+    Returns message with unique ID to enable frontend deduplication.
     """
     analysis_result = state.get("analysis_result")
 
@@ -243,22 +243,27 @@ def route_after_chat(state: ConversationalState) -> str:
     """
     Route after chat response.
 
-    - If analysis readiness is high (>= 0.7) and not yet offered → offer analysis
-    - Otherwise → end
+    Chat mode:
+    - Always end (user can switch to analysis mode via toggle if they want analysis)
 
-    Note: We ONLY use the readiness threshold, not the LLM's suggest_deep_analysis flag,
-    because the LLM doesn't reliably follow scoring rules.
+    Analysis mode:
+    - If analysis readiness >= 0.7 (6+ of 8 items) and not yet run → auto-trigger analysis
+    - Otherwise → end (keep gathering facts)
+
+    Threshold of 0.7 requires at least 6 of these 8 items to be known:
+    1. State/territory, 2. Problem type, 3. User's role, 4. What happened,
+    5. Desired outcome, 6. Other party, 7. Timeline/dates, 8. Documents/evidence
     """
     analysis_readiness = state.get("analysis_readiness", 0.0)
-    already_offered = state.get("analysis_offered", False)
+    ui_mode = state.get("ui_mode", "chat")
+    already_analyzed = state.get("analysis_result") is not None
 
-    # Offer analysis ONLY if readiness threshold is met
-    # The readiness score is based on % of checklist items gathered (8 items total)
-    # 0.7 = at least 5-6 items known (state, problem type, role, facts, desired outcome, etc.)
-    if analysis_readiness >= 0.7 and not already_offered:
-        logger.info(f"Routing to analysis offer (readiness={analysis_readiness})")
-        return "offer_analysis"
+    # Analysis mode: auto-trigger when enough facts collected (6+ items known)
+    if ui_mode == "analysis" and analysis_readiness >= 0.7 and not already_analyzed:
+        logger.info(f"Analysis mode: auto-triggering analysis (readiness={analysis_readiness})")
+        return "auto_analysis"
 
+    # Chat mode: just end (no offer message - user can use mode toggle)
     return "end"
 
 

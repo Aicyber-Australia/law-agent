@@ -109,3 +109,26 @@ def extract_document_url(state: dict) -> Optional[str]:
         return url_match.group(0)
 
     return None
+
+
+def extract_ui_mode(state: dict) -> str:
+    """
+    Extract UI mode from CopilotKit context.
+
+    Args:
+        state: Agent state dict containing 'copilotkit' key
+
+    Returns:
+        "chat" or "analysis" - defaults to "chat" if not found
+    """
+    raw_value = extract_context_item(state, "UI mode")
+    cleaned = clean_context_value(raw_value)
+
+    if not cleaned:
+        return "chat"
+
+    # Check for analysis mode indicator
+    if "ANALYSIS MODE" in cleaned.upper():
+        return "analysis"
+
+    return "chat"

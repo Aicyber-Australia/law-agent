@@ -12,6 +12,8 @@ import {
 import { TextMessage, MessageRole } from "@copilotkit/runtime-client-gql";
 import { StateSelector } from "../components/StateSelector";
 import { FileUpload } from "../components/FileUpload";
+import { ModeToggle } from "../components/ModeToggle";
+import { useMode } from "../contexts/ModeContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -43,6 +45,9 @@ export default function ChatPage() {
   } | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Get current mode from context
+  const { mode } = useMode();
+
   // Share user's state/territory with the Copilot agent
   useCopilotReadable({
     description: "The user's Australian state/territory for legal queries",
@@ -59,6 +64,15 @@ export default function ChatPage() {
       : "No document uploaded yet.",
   });
 
+  // Share UI mode with the Copilot agent
+  useCopilotReadable({
+    description: "The UI mode the user has selected",
+    value:
+      mode === "analysis"
+        ? `User is in ANALYSIS MODE. This means they want a thorough consultation like talking to a lawyer. Guide them through understanding their situation first, then explain the relevant law, and finally offer options and strategy when they ask or when it's natural.`
+        : `User is in CHAT MODE. This is casual Q&A mode for quick legal questions. Be helpful and conversational.`,
+  });
+
   const handleFileUploaded = (url: string, filename: string) => {
     setUploadedDocument({ url, filename });
   };
@@ -71,7 +85,6 @@ export default function ChatPage() {
   const { state: agentState } = useCoAgent<{
     quick_replies?: string[];
     suggest_brief?: boolean;
-    suggest_lawyer?: boolean;
   }>({
     name: "auslaw_agent",
   });
@@ -89,6 +102,12 @@ export default function ChatPage() {
   // Sidebar content component
   const SidebarContent = () => (
     <div className="flex flex-col h-full gap-6">
+      {/* Mode Toggle */}
+      <ModeToggle />
+
+      {/* Divider */}
+      <div className="h-px bg-slate-200" />
+
       {/* Location Section */}
       <div className="space-y-3">
         <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
@@ -183,7 +202,7 @@ export default function ChatPage() {
   );
 
   return (
-    <div className="flex h-dvh bg-slate-50">
+    <div className="flex h-dvh bg-slate-50 chat-page-container">
       {/* Mobile Header */}
       <header className="fixed top-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200/80 lg:hidden">
         <div className="flex items-center justify-between px-4 py-3">

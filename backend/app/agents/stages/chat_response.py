@@ -4,7 +4,6 @@ Generates natural, helpful responses using tools (lookup_law, find_lawyer)
 when needed. Includes quick reply suggestions for smoother conversation flow.
 """
 
-from typing import Optional
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
@@ -18,8 +17,8 @@ from app.tools.find_lawyer import find_lawyer
 from app.config import logger
 
 
-# System prompt for natural conversation
-SYSTEM_PROMPT = """You are an Australian legal assistant having a natural, helpful conversation.
+# System prompt for CHAT MODE - natural conversation, casual Q&A
+CHAT_MODE_PROMPT = """You are an Australian legal assistant having a natural, helpful conversation.
 You're like a knowledgeable friend who happens to understand law - approachable, clear, and never condescending.
 
 ## How to Respond
@@ -57,6 +56,70 @@ If the user's state/territory shows as "Not specified", ask them to select their
 Remember: Your goal is to be helpful and informative while keeping the conversation natural and flowing."""
 
 
+# System prompt for ANALYSIS MODE - natural lawyer consultation flow
+ANALYSIS_MODE_PROMPT = """You are a friendly Australian legal assistant having a consultation with someone about their legal situation. Think of yourself as a knowledgeable paralegal doing an initial intake - thorough, warm, and methodical.
+
+## How to Conduct the Consultation
+
+### Phase 1: Understand Their Situation First
+When someone describes a legal issue:
+- DON'T immediately give legal advice or explain the law
+- DO ask clarifying questions to fully understand:
+  • What exactly happened? (specific events, dates, amounts)
+  • Who is involved? (names, relationships)
+  • What outcome are they hoping for?
+  • What evidence or documents do they have?
+- After gathering enough information, summarize: "Let me make sure I understand correctly..."
+- Confirm your understanding is accurate before proceeding
+- Ask ONE question at a time - don't overwhelm
+
+### Phase 2: Explain the Law (When You Understand the Situation)
+Once you have a clear picture:
+- Explain what the law says in PLAIN ENGLISH - no legal jargon
+- Use the lookup_law tool to find relevant legislation
+- Explain their rights and obligations clearly
+- Point out the strengths in their position
+- Honestly discuss weaknesses and risks they should know about
+- Mention relevant cases if helpful (explain in everyday language)
+- Note any time-sensitive deadlines (e.g., limitation periods)
+
+### Phase 3: Options & Strategy (When Asked or Natural)
+Offer options when:
+- User asks "what can I do?", "what are my options?", "what should I do?"
+- You've explained the law and it's natural to discuss next steps
+- Don't force this - let it flow from the conversation
+
+When suggesting options, PRIORITIZE in this order:
+1. FREE options first: ombudsmen, fair trading, community legal centres
+2. Low-cost tribunals: NCAT (NSW), VCAT (VIC), QCAT (QLD), etc.
+3. Self-help resources and guides
+4. Paid lawyer ONLY when truly necessary:
+   - Criminal charges involved
+   - Court litigation unavoidable
+   - Amount at stake > $50,000
+   - Safety concerns
+
+## Important Guidelines
+
+**NEVER make "consult a lawyer" your default or frequent recommendation.**
+It's annoying and unhelpful. Most issues can be resolved without expensive lawyers.
+Only suggest professional legal help when the situation genuinely requires it.
+
+**State/Territory is Critical**
+If state/territory shows as "Not specified", ask them to select their state first.
+Laws vary significantly between Australian states.
+
+## User Context
+- State/Territory: {user_state}
+- Has uploaded document: {has_document}
+
+## Your Tone
+- Warm and approachable, not formal or intimidating
+- Explain things like you would to a friend
+- Be honest about weaknesses, but encouraging
+- Empathetic - they're dealing with a real problem"""
+
+
 class QuickReplyAnalysis(BaseModel):
     """Analyze the conversation to suggest quick replies."""
     quick_replies: list[str] = Field(
@@ -67,22 +130,9 @@ class QuickReplyAnalysis(BaseModel):
         default=False,
         description="True if user's situation is complex enough to benefit from a lawyer brief"
     )
-    suggest_lawyer: bool = Field(
-        default=False,
-        description="True if user should consider consulting a lawyer soon"
-    )
-    suggest_deep_analysis: bool = Field(
-        default=False,
-        description="True if we have enough facts to offer a deeper analysis of their situation"
-    )
-    analysis_readiness: float = Field(
-        default=0.0,
-        ge=0.0,
-        le=1.0,
-        description="Score 0-1 indicating how ready we are for deep analysis (0.7+ means suggest it)"
-    )
 
 
+# Quick reply prompt - used for both chat and analysis modes
 QUICK_REPLY_PROMPT = """Based on this conversation, suggest 2-4 quick reply options that would be natural for the user to say next.
 
 Make them:
@@ -96,35 +146,10 @@ Examples of good quick replies:
 - "How do I do that?"
 - "What happens next?"
 - "Can you explain more?"
-- "Find me a lawyer"
 - "What about costs?"
+- "Generate a brief"
 
-## Analysis Readiness Assessment
-
-Count how many items from this checklist are CLEARLY known from the conversation.
-
-**Info Checklist (8 items total):**
-1. □ Australian state/territory (NSW, VIC, QLD, etc.)
-2. □ Nature of legal problem (tenancy, employment, contract, family, etc.)
-3. □ User's role (tenant, employee, buyer, parent, etc.)
-4. □ What happened (key events/facts)
-5. □ What user wants (desired outcome)
-6. □ Other party identified (landlord, employer, company name, etc.)
-7. □ Timeline or dates mentioned
-8. □ Documents/evidence mentioned
-
-**Scoring:**
-- Count items that are CLEARLY known (not vague or implied)
-- analysis_readiness = items_known / 8 (e.g., 6 items = 0.75)
-
-**Suggest deep analysis when:**
-- analysis_readiness >= 0.7 (at least 6 of 8 items known) AND
-- User has a real dispute/problem (not just asking "what is X?") AND
-- User hasn't already received detailed analysis this session
-
-Also indicate if:
-- The situation seems complex enough that a lawyer brief would be helpful
-- The user should seriously consider consulting a lawyer
+Also indicate if the situation seems complex enough that a formal lawyer brief would be helpful.
 
 Current conversation:
 {conversation}
@@ -137,7 +162,6 @@ async def generate_quick_replies(
     messages: list,
     response_content: str,
     config: RunnableConfig,
-    user_state: Optional[str] = None,
 ) -> QuickReplyAnalysis:
     """Generate quick reply suggestions based on conversation context."""
     try:
@@ -162,22 +186,6 @@ async def generate_quick_replies(
             config=internal_config,
         )
 
-        # IMPORTANT: Cap analysis_readiness if state/territory is unknown
-        # This is enforced in code because LLMs don't reliably follow scoring rules
-        state_is_known = user_state and user_state not in [
-            "Not specified",
-            "User has not selected their state yet.",
-            None,
-            "",
-        ]
-        if not state_is_known and result.analysis_readiness > 0.5:
-            logger.info(
-                f"Capping analysis_readiness from {result.analysis_readiness} to 0.5 "
-                "(state/territory unknown)"
-            )
-            result.analysis_readiness = 0.5
-            result.suggest_deep_analysis = False
-
         return result
 
     except Exception as e:
@@ -185,21 +193,30 @@ async def generate_quick_replies(
         return QuickReplyAnalysis(
             quick_replies=["Tell me more", "What are my options?"],
             suggest_brief=False,
-            suggest_lawyer=False,
-            suggest_deep_analysis=False,
-            analysis_readiness=0.0,
         )
 
 
-def _create_chat_agent(user_state: str, has_document: bool):
-    """Create a ReAct agent with tools for chat."""
+def _create_chat_agent(user_state: str, has_document: bool, ui_mode: str = "chat"):
+    """Create a ReAct agent with tools for chat.
+
+    Args:
+        user_state: User's Australian state/territory
+        has_document: Whether user has uploaded a document
+        ui_mode: "chat" for casual Q&A, "analysis" for guided intake
+    """
     llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
 
     # Tools available for chat
     tools = [lookup_law, find_lawyer]
 
+    # Select system prompt based on UI mode
+    if ui_mode == "analysis":
+        system_template = ANALYSIS_MODE_PROMPT
+    else:
+        system_template = CHAT_MODE_PROMPT
+
     # Create system prompt with user context
-    system = SYSTEM_PROMPT.format(
+    system = system_template.format(
         user_state=user_state or "Not specified",
         has_document="Yes" if has_document else "No",
     )
@@ -224,6 +241,8 @@ async def chat_response_node(
     Uses ReAct agent pattern to naturally incorporate tool usage
     (lookup_law, find_lawyer) when helpful.
 
+    In analysis mode, uses guided intake prompts and lower analysis threshold.
+
     Args:
         state: Current conversation state
         config: LangGraph config
@@ -234,12 +253,13 @@ async def chat_response_node(
     messages = state.get("messages", [])
     user_state = state.get("user_state")
     has_document = bool(state.get("uploaded_document_url"))
+    ui_mode = state.get("ui_mode", "chat")
 
-    logger.info(f"Chat response: user_state={user_state}, has_document={has_document}")
+    logger.info(f"Chat response: user_state={user_state}, has_document={has_document}, ui_mode={ui_mode}")
 
     try:
-        # Create agent with tools
-        agent = _create_chat_agent(user_state, has_document)
+        # Create agent with tools (mode-specific prompts)
+        agent = _create_chat_agent(user_state, has_document, ui_mode)
 
         # Use config that hides tool calls but keeps message streaming
         # This prevents confusing UX where tool calls appear then disappear
@@ -266,16 +286,12 @@ async def chat_response_node(
             messages,
             response_content,
             config,
-            user_state=user_state,
         )
 
         return {
             "messages": [final_message],
             "quick_replies": quick_reply_analysis.quick_replies,
             "suggest_brief": quick_reply_analysis.suggest_brief,
-            "suggest_lawyer": quick_reply_analysis.suggest_lawyer,
-            "suggest_deep_analysis": quick_reply_analysis.suggest_deep_analysis,
-            "analysis_readiness": quick_reply_analysis.analysis_readiness,
         }
 
     except Exception as e:
@@ -288,7 +304,4 @@ async def chat_response_node(
             "messages": [AIMessage(content=error_message)],
             "quick_replies": ["What can you help with?", "Tell me about tenant rights"],
             "suggest_brief": False,
-            "suggest_lawyer": False,
-            "suggest_deep_analysis": False,
-            "analysis_readiness": 0.0,
         }

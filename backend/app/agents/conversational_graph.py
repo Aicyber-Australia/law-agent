@@ -3,20 +3,17 @@
 This is a simpler, faster alternative to the adaptive graph.
 Focuses on natural conversation with tools, not multi-stage pipelines.
 
-Flow (chat mode):
-    initialize -> safety_check -> chat_response -> [END | analysis_offer -> END]
+Flow (chat and analysis modes):
+    initialize -> safety_check -> chat_response -> END
                       |
                       v (if crisis)
               escalation_response -> END
 
-Flow (analysis offer - when readiness >= 0.7):
-    analysis_offer -> END (wait for user response)
+    In analysis mode, the agent naturally guides users through a consultation
+    (understand situation → explain law → offer options) via its system prompt.
+    No automatic analysis triggers - conversation flows naturally.
 
-    Next message:
-    initialize -> handle_analysis_response -> [accept -> deep_analysis -> analysis_response -> END]
-                                             [decline -> chat_response -> END]
-
-Flow (brief mode - triggered by user):
+Flow (brief mode - triggered by user button):
     initialize -> brief_check_info -> [brief_ask_questions | brief_generate] -> END
 """
 
@@ -28,7 +25,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
 from app.agents.conversational_state import ConversationalState, ConversationalOutput
-from app.agents.utils import extract_user_state, extract_document_url
+from app.agents.utils import extract_user_state, extract_document_url, extract_ui_mode
 from app.agents.stages.safety_check_lite import (
     safety_check_lite_node,
     route_after_safety_lite,
@@ -39,14 +36,6 @@ from app.agents.stages.brief_flow import (
     brief_check_info_node,
     brief_ask_questions_node,
     brief_generate_node,
-)
-from app.agents.stages.deep_analysis import (
-    analysis_offer_node,
-    deep_analysis_node,
-    analysis_response_node,
-    route_after_chat,
-    route_after_analysis_offer,
-    handle_analysis_response_node,
 )
 from app.config import logger
 
@@ -83,6 +72,7 @@ async def initialize_node(state: ConversationalState) -> dict:
     # Extract CopilotKit context
     user_state = extract_user_state(state)
     uploaded_document_url = extract_document_url(state)
+    ui_mode = extract_ui_mode(state)  # "chat" or "analysis"
 
     # Check if this is the first message (new session)
     is_first_message = len(messages) <= 1
@@ -97,7 +87,7 @@ async def initialize_node(state: ConversationalState) -> dict:
         f"Conversational init: session={session_id[:8]}, "
         f"query_length={len(current_query)}, user_state={user_state}, "
         f"has_document={bool(uploaded_document_url)}, first_msg={is_first_message}, "
-        f"brief_mode={is_brief_mode}"
+        f"brief_mode={is_brief_mode}, ui_mode={ui_mode}"
     )
 
     return {
@@ -107,25 +97,21 @@ async def initialize_node(state: ConversationalState) -> dict:
         "uploaded_document_url": uploaded_document_url,
         "is_first_message": is_first_message,
         "mode": "brief" if is_brief_mode else "chat",
+        "ui_mode": ui_mode,
     }
 
 
-def route_after_initialize(state: ConversationalState) -> Literal["brief", "analysis_response", "check", "skip"]:
+def route_after_initialize(state: ConversationalState) -> Literal["brief", "check", "skip"]:
     """
     Route based on mode after initialization.
 
     - brief: User triggered brief generation
-    - analysis_response: User is responding to analysis offer
     - check: Run safety check (first message or risky content)
     - skip: Skip safety, go directly to chat
     """
     # Brief mode bypasses normal flow
     if state.get("mode") == "brief":
         return "brief"
-
-    # Check if we're waiting for user's response to analysis offer
-    if state.get("analysis_pending_response", False):
-        return "analysis_response"
 
     # Always check on first message
     if state.get("is_first_message", True):
@@ -180,11 +166,15 @@ def build_conversational_graph():
     """
     Build the conversational legal assistant graph.
 
-    Chat flow:
+    Chat/Analysis flow:
     - Initialize (extract context)
     - Safety check (lightweight, skippable for follow-ups)
     - Chat response (natural conversation with tools)
-    - Optional: Analysis offer -> Deep analysis -> Analysis response
+    - END
+
+    In analysis mode, the agent uses a different system prompt that guides
+    it to behave like a lawyer consultation (understand → explain law → options).
+    No automatic analysis triggers - conversation flows naturally.
 
     Brief flow (user-triggered):
     - Initialize (detect brief trigger)
@@ -194,17 +184,11 @@ def build_conversational_graph():
     # Output schema limits what gets streamed to UI
     workflow = StateGraph(ConversationalState, output=ConversationalOutput)
 
-    # Add chat mode nodes
+    # Add chat/analysis mode nodes
     workflow.add_node("initialize", initialize_node)
     workflow.add_node("safety_check", safety_check_lite_node)
     workflow.add_node("escalation_response", format_escalation_response_lite)
     workflow.add_node("chat_response", chat_response_node)
-
-    # Add deep analysis nodes
-    workflow.add_node("analysis_offer", analysis_offer_node)
-    workflow.add_node("handle_analysis_response", handle_analysis_response_node)
-    workflow.add_node("deep_analysis", deep_analysis_node)
-    workflow.add_node("analysis_response", analysis_response_node)
 
     # Add brief mode nodes
     workflow.add_node("brief_check_info", brief_check_info_node)
@@ -220,7 +204,6 @@ def build_conversational_graph():
         route_after_initialize,
         {
             "brief": "brief_check_info",
-            "analysis_response": "handle_analysis_response",
             "check": "safety_check",
             "skip": "chat_response",
         }
@@ -236,32 +219,8 @@ def build_conversational_graph():
         }
     )
 
-    # After chat response, optionally offer analysis
-    workflow.add_conditional_edges(
-        "chat_response",
-        route_after_chat,
-        {
-            "offer_analysis": "analysis_offer",
-            "end": END,
-        }
-    )
-
-    # After analysis offer, END and wait for user's response
-    # (The next message will be routed via handle_analysis_response)
-    workflow.add_edge("analysis_offer", END)
-
-    # After handling user's response to analysis offer
-    workflow.add_conditional_edges(
-        "handle_analysis_response",
-        route_after_analysis_offer,
-        {
-            "accept": "deep_analysis",
-            "decline": "chat_response",  # Continue normal chat if declined
-        }
-    )
-
-    # After deep analysis, format response
-    workflow.add_edge("deep_analysis", "analysis_response")
+    # After chat response, always end (no auto-analysis trigger)
+    workflow.add_edge("chat_response", END)
 
     # Brief mode routing
     workflow.add_conditional_edges(
@@ -275,7 +234,6 @@ def build_conversational_graph():
 
     # Terminal nodes
     workflow.add_edge("escalation_response", END)
-    workflow.add_edge("analysis_response", END)
     workflow.add_edge("brief_ask_questions", END)  # Wait for user response
     workflow.add_edge("brief_generate", END)
 

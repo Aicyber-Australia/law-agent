@@ -110,6 +110,20 @@ Use config helpers from `app/agents/utils/config.py` to control streaming:
 | `get_chat_agent_config` | True | False | ReAct agents with tools |
 | (default config) | True | True | Simple LLM calls without tools |
 
+**Known limitation**: With `emit_messages=True`, intermediate ReAct agent messages like "Let me search for that..." will appear then disappear when the final response arrives. This is a tradeoff for keeping response streaming. CopilotKit currently doesn't support selective message filtering (see [GitHub Issue #1959](https://github.com/CopilotKit/CopilotKit/issues/1959)).
+
+### Message Deduplication
+
+Messages returned from LangGraph nodes must have explicit unique IDs to prevent duplicates on checkpoint restore. Without IDs, the frontend cannot deduplicate messages that are re-sent when state is restored.
+
+```python
+# Good - explicit ID preserved across checkpoint restore
+AIMessage(content="...", id=f"analysis_offer_{uuid.uuid4().hex[:8]}")
+
+# Bad - ID may change on deserialization, causing duplicates
+AIMessage(content="...")
+```
+
 ### Document Upload Flow
 1. Frontend uploads to Supabase Storage bucket `documents`
 2. Public URL shared with agent via `useCopilotReadable`

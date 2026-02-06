@@ -8,6 +8,7 @@ User-triggered brief generation that:
 This is Phase 3 of conversational mode - activated when user clicks "Generate Brief".
 """
 
+import uuid
 from typing import Literal, Optional
 from pydantic import BaseModel, Field
 from langchain_openai import ChatOpenAI
@@ -528,8 +529,10 @@ async def brief_ask_questions_node(
             else:
                 question_text = f"{progress}\n\n{question}"
 
+            # Use explicit message ID to prevent duplicates on checkpoint restore
+            msg_id = f"brief_q{current_index + 1}_{uuid.uuid4().hex[:8]}"
             return {
-                "messages": [AIMessage(content=question_text)],
+                "messages": [AIMessage(content=question_text, id=msg_id)],
                 "brief_questions_asked": questions_asked + 1,
                 "brief_pending_questions": remaining_questions,
                 "brief_current_question_index": current_index + 1,
@@ -548,7 +551,10 @@ async def brief_ask_questions_node(
         logger.error(f"Brief question generation error: {e}")
         # If question generation fails, proceed with brief generation
         return {
-            "messages": [AIMessage(content="I'll prepare your brief with the information we have.")],
+            "messages": [AIMessage(
+                content="I'll prepare your brief with the information we have.",
+                id=f"brief_q_error_{uuid.uuid4().hex[:8]}"
+            )],
             "brief_questions_asked": questions_asked + 1,
             "brief_info_complete": True,  # Force completion
             "brief_pending_questions": [],
@@ -608,7 +614,10 @@ async def brief_generate_node(
         )
 
         return {
-            "messages": [AIMessage(content=formatted_brief)],
+            "messages": [AIMessage(
+                content=formatted_brief,
+                id=f"brief_generated_{uuid.uuid4().hex[:8]}"
+            )],
             "mode": "chat",  # Return to chat mode
             "quick_replies": [
                 "Find me a lawyer",
@@ -623,7 +632,8 @@ async def brief_generate_node(
         return {
             "messages": [AIMessage(
                 content="I apologize, but I encountered an issue generating your brief. "
-                "Please try again, or I can help you find a lawyer directly."
+                "Please try again, or I can help you find a lawyer directly.",
+                id=f"brief_error_{uuid.uuid4().hex[:8]}"
             )],
             "mode": "chat",
             "quick_replies": ["Find me a lawyer", "Try again", "What can you help with?"],
