@@ -1,0 +1,46 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Droplet
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DROPLET_IP }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "=== Pulling latest code ==="
+            cd /root/law-agent
+            git pull origin main
+
+            echo "=== Building new image ==="
+            cd backend
+            docker build -t auslaw-backend .
+
+            echo "=== Restarting container ==="
+            docker stop auslaw-backend || true
+            docker rm auslaw-backend || true
+            docker run -d \
+              --name auslaw-backend \
+              --env-file .env \
+              -e HOST=0.0.0.0 \
+              -e PORT=8000 \
+              -p 80:8000 \
+              --restart unless-stopped \
+              auslaw-backend
+            docker image prune -f
+
+            echo "=== Waiting for startup ==="
+            sleep 5
+
+            echo "=== Health check ==="
+            curl -f http://localhost/health || (echo "HEALTH CHECK FAILED" && docker logs auslaw-backend --tail 20 && exit 1)
+            echo "=== Deploy successful ==="
