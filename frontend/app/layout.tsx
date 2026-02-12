@@ -33,19 +33,19 @@ export const metadata: Metadata = {
       "Get instant answers about Australian law, find qualified lawyers, and receive step-by-step legal guidance across all states and territories.",
     images: [
       {
-        url: "/icon.png",
-        width: 512,
-        height: 512,
-        alt: "AusLaw AI logo",
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "AusLaw AI - Australian Legal Assistant",
       },
     ],
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: "AusLaw AI - Australian Legal Assistant",
     description:
       "Get instant answers about Australian law, find qualified lawyers, and receive step-by-step legal guidance.",
-    images: ["/icon.png"],
+    images: ["/og-image.png"],
   },
   robots: {
     index: true,
