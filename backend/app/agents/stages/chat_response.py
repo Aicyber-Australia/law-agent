@@ -45,6 +45,7 @@ You're like a knowledgeable friend who happens to understand law - approachable,
 ## User Context
 - State/Territory: {user_state}
 - Has uploaded document: {has_document}
+- Document URL: {document_url}
 
 ## Important: Ask User to Select State if Unknown
 If the user's state/territory shows as "Not specified", ask them to select their state from the dropdown menu at the top of the chat. This is important because laws vary significantly between states. Say something like: "I noticed you haven't selected your state yet. Could you pick your state or territory from the dropdown at the top? Laws can vary quite a bit between states, so this helps me give you accurate information."
@@ -52,7 +53,7 @@ If the user's state/territory shows as "Not specified", ask them to select their
 ## Tool Usage Guidelines
 - Use lookup_law when user asks about specific rights, laws, or legal requirements
 - Use find_lawyer when user asks for lawyer recommendations or says they need professional help
-- Use analyze_document when the user has uploaded a document and asks you to review, analyze, or explain it. You MUST call this tool to read the document content - you cannot see the document without it.
+- Use analyze_document when the user has uploaded a document and asks you to review, analyze, or explain it. You MUST call this tool to read the document content - you cannot see the document without it. IMPORTANT: Always use the exact Document URL shown above - NEVER make up or guess a URL.
 - Always pass the user's state to tools (if known)
 
 Remember: Your goal is to be helpful and informative while keeping the conversation natural and flowing."""
@@ -114,11 +115,12 @@ Laws vary significantly between Australian states.
 ## User Context
 - State/Territory: {user_state}
 - Has uploaded document: {has_document}
+- Document URL: {document_url}
 
 ## Tool Usage Guidelines
 - Use lookup_law when you need to reference specific laws or legislation
 - Use find_lawyer when user needs professional legal help
-- Use analyze_document when the user has uploaded a document and asks you to review, analyze, or explain it. You MUST call this tool to read the document content - you cannot see the document without it.
+- Use analyze_document when the user has uploaded a document and asks you to review, analyze, or explain it. You MUST call this tool to read the document content - you cannot see the document without it. IMPORTANT: Always use the exact Document URL shown above - NEVER make up or guess a URL.
 
 ## Your Tone
 - Warm and approachable, not formal or intimidating
@@ -203,12 +205,13 @@ async def generate_quick_replies(
         )
 
 
-def _create_chat_agent(user_state: str, has_document: bool, ui_mode: str = "chat"):
+def _create_chat_agent(user_state: str, has_document: bool, document_url: str = "", ui_mode: str = "chat"):
     """Create a ReAct agent with tools for chat.
 
     Args:
         user_state: User's Australian state/territory
         has_document: Whether user has uploaded a document
+        document_url: Actual URL of uploaded document (for analyze_document tool)
         ui_mode: "chat" for casual Q&A, "analysis" for guided intake
     """
     llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
@@ -226,6 +229,7 @@ def _create_chat_agent(user_state: str, has_document: bool, ui_mode: str = "chat
     system = system_template.format(
         user_state=user_state or "Not specified",
         has_document="Yes" if has_document else "No",
+        document_url=document_url or "None",
     )
 
     # Create ReAct agent
@@ -259,14 +263,15 @@ async def chat_response_node(
     """
     messages = state.get("messages", [])
     user_state = state.get("user_state")
-    has_document = bool(state.get("uploaded_document_url"))
+    uploaded_document_url = state.get("uploaded_document_url", "")
+    has_document = bool(uploaded_document_url)
     ui_mode = state.get("ui_mode", "chat")
 
-    logger.info(f"Chat response: user_state={user_state}, has_document={has_document}, ui_mode={ui_mode}")
+    logger.info(f"Chat response: user_state={user_state}, has_document={has_document}, document_url={uploaded_document_url}, ui_mode={ui_mode}")
 
     try:
         # Create agent with tools (mode-specific prompts)
-        agent = _create_chat_agent(user_state, has_document, ui_mode)
+        agent = _create_chat_agent(user_state, has_document, uploaded_document_url, ui_mode)
 
         # Use config that hides tool calls but keeps message streaming
         # This prevents confusing UX where tool calls appear then disappear
