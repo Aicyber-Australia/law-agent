@@ -1,7 +1,7 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Response
+from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Response, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -13,6 +13,7 @@ from ag_ui_langgraph import add_langgraph_fastapi_endpoint
 
 from app.utils.document_parser import parse_document
 from app.config import logger, CORS_ORIGINS
+from app.auth import get_current_user, get_optional_user
 from app.db import supabase
 
 # Security: File upload size limit (10MB)
@@ -68,9 +69,9 @@ app.add_middleware(
 )
 
 
-# Rate limiting middleware for /copilotkit endpoint
-class RateLimitMiddleware(BaseHTTPMiddleware):
-    """Apply rate limiting to specific paths."""
+# Combined auth + rate limiting middleware for /copilotkit endpoint
+class CopilotKitMiddleware(BaseHTTPMiddleware):
+    """Apply auth validation and rate limiting to /copilotkit."""
 
     # Simple in-memory rate limiting (for production, use Redis)
     _requests: dict[str, list[float]] = {}
@@ -80,12 +81,22 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         import time
 
-        # Only rate limit /copilotkit POST requests
+        # Only apply to /copilotkit POST requests
         if request.url.path == "/copilotkit" and request.method == "POST":
+            # Auth check: validate Bearer token
+            user = await get_optional_user(request)
+            if not user:
+                return Response(
+                    content='{"detail": "Authentication required"}',
+                    status_code=401,
+                    media_type="application/json",
+                )
+            logger.info(f"Authenticated copilotkit request from user: {user['user_id'][:8]}")
+
+            # Rate limiting
             client_ip = get_remote_address(request)
             current_time = time.time()
 
-            # Clean old entries and get recent requests
             if client_ip not in self._requests:
                 self._requests[client_ip] = []
 
@@ -107,7 +118,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-app.add_middleware(RateLimitMiddleware)
+app.add_middleware(CopilotKitMiddleware)
 
 # Load conversational graph
 from app.agents.conversational_graph import get_conversational_graph
@@ -139,7 +150,11 @@ def health_check():
 
 @app.post("/upload")
 @limiter.limit("10/minute")
-async def upload_file(request: Request, file: UploadFile = File(...)):
+async def upload_file(
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+):
     """
     Upload and parse a document (PDF, DOCX, or image).
     Returns the parsed text content.

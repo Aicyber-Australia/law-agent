@@ -27,6 +27,11 @@ get_required_env("OPENAI_API_KEY")  # langchain_openai reads this automatically
 # Optional: Cohere API key for reranking (gracefully degrades if not set)
 COHERE_API_KEY = os.environ.get("COHERE_API_KEY")
 
+# Supabase JWT secret for auth token verification
+SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET")
+if not SUPABASE_JWT_SECRET:
+    logger.warning("SUPABASE_JWT_SECRET is not set — auth endpoints will reject all requests")
+
 # CORS configuration (comma-separated list of allowed origins)
 _cors_origins = os.environ.get("CORS_ORIGINS", "http://localhost:3000")
 CORS_ORIGINS = [origin.strip() for origin in _cors_origins.split(",") if origin.strip()]

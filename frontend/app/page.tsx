@@ -44,7 +44,7 @@ export default function LandingPage() {
             >
               How it works
             </Link>
-            <Link href="/chat">
+            <Link href="/login">
               <Button className="bg-sky-700 hover:bg-sky-800 text-white cursor-pointer">
                 Start Free
                 <ArrowRight className="ml-2 h-4 w-4" />
@@ -77,7 +77,7 @@ export default function LandingPage() {
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link href="/chat">
+            <Link href="/login">
               <Button
                 size="lg"
                 className="bg-sky-700 hover:bg-sky-800 text-white text-lg px-8 py-6 cursor-pointer"
@@ -195,7 +195,7 @@ export default function LandingPage() {
             Join thousands of Australians who use AusLaw AI to navigate legal
             questions with confidence.
           </p>
-          <Link href="/chat">
+          <Link href="/login">
             <Button
               size="lg"
               className="bg-sky-600 hover:bg-sky-700 text-white text-lg px-8 py-6 cursor-pointer"

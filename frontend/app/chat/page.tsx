@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { CopilotChat } from "@copilotkit/react-ui";
 import "@copilotkit/react-ui/styles.css";
 import {
@@ -10,6 +11,8 @@ import {
   useCoAgent,
 } from "@copilotkit/react-core";
 import { TextMessage, MessageRole } from "@copilotkit/runtime-client-gql";
+import { createClient } from "@/lib/supabase/client";
+import type { User } from "@supabase/supabase-js";
 import { StateSelector } from "../components/StateSelector";
 import { FileUpload } from "../components/FileUpload";
 import { ModeToggle } from "../components/ModeToggle";
@@ -24,6 +27,15 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
   Scale,
   FileCheck,
   X,
@@ -35,15 +47,45 @@ import {
   Plus,
   Users,
   RefreshCw,
+  LogOut,
 } from "lucide-react";
 
 export default function ChatPage() {
+  const router = useRouter();
   const [userState, setUserState] = useState<string | null>(null);
   const [uploadedDocument, setUploadedDocument] = useState<{
     url: string;
     filename: string;
   } | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+
+  // Fetch current user
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => setUser(user));
+  }, []);
+
+  const handleSignOut = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+  };
+
+  // Get user initials for avatar
+  const getUserInitials = () => {
+    if (!user) return "?";
+    const name = user.user_metadata?.full_name || user.email || "";
+    if (user.user_metadata?.full_name) {
+      return name
+        .split(" ")
+        .map((n: string) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2);
+    }
+    return (user.email?.[0] || "?").toUpperCase();
+  };
 
   // Get current mode from context
   const { mode } = useMode();
@@ -224,16 +266,35 @@ export default function ChatPage() {
             </div>
           </div>
 
-          <Link href="/">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-slate-500 hover:text-slate-900 cursor-pointer gap-1"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              <span className="hidden sm:inline">Home</span>
-            </Button>
-          </Link>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="cursor-pointer rounded-full h-9 w-9">
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="bg-primary/10 text-primary text-xs font-medium">
+                    {getUserInitials()}
+                  </AvatarFallback>
+                </Avatar>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="font-normal">
+                <p className="text-sm font-medium">{user?.user_metadata?.full_name || "Account"}</p>
+                <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild className="cursor-pointer">
+                <Link href="/">
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Home
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-red-600 focus:text-red-600">
+                <LogOut className="mr-2 h-4 w-4" />
+                Log out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
@@ -273,6 +334,35 @@ export default function ChatPage() {
           <span className="text-sm font-medium text-slate-600">
             {mode === "analysis" ? "Case Analysis" : "Legal Chat"}
           </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="cursor-pointer rounded-full h-9 w-9">
+                <Avatar className="h-8 w-8">
+                  <AvatarFallback className="bg-primary/10 text-primary text-xs font-medium">
+                    {getUserInitials()}
+                  </AvatarFallback>
+                </Avatar>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="font-normal">
+                <p className="text-sm font-medium">{user?.user_metadata?.full_name || "Account"}</p>
+                <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild className="cursor-pointer">
+                <Link href="/">
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Home
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-red-600 focus:text-red-600">
+                <LogOut className="mr-2 h-4 w-4" />
+                Log out
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Add top padding on mobile for fixed header */}

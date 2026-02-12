@@ -1,15 +1,12 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Upload, Loader2, X } from "lucide-react";
 
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = createClient();
 
 // Security: File size limit (10MB)
 const MAX_FILE_SIZE_MB = 10;

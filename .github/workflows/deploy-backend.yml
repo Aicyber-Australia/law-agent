@@ -40,7 +40,7 @@ jobs:
             docker image prune -f
 
             echo "=== Waiting for startup ==="
-            sleep 5
+            sleep 10
 
             echo "=== Health check ==="
             curl -f http://localhost/health || (echo "HEALTH CHECK FAILED" && docker logs auslaw-backend --tail 20 && exit 1)

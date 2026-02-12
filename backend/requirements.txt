@@ -12,6 +12,7 @@ Pillow>=10.1.0
 python-multipart>=0.0.21
 httpx>=0.28.1
 slowapi>=0.1.9
+PyJWT[crypto]>=2.8.0
 
 # RAG dependencies
 openai>=1.10.0
