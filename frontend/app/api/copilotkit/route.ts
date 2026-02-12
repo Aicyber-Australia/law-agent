@@ -1,3 +1,5 @@
+export const runtime = 'edge';
+
 import { NextRequest } from "next/server";
 import {
   CopilotRuntime,
@@ -10,7 +12,7 @@ const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:8000";
 
 const serviceAdapter = new ExperimentalEmptyAdapter();
 
-const runtime = new CopilotRuntime({
+const copilotRuntime = new CopilotRuntime({
   agents: {
     auslaw_agent: new HttpAgent({
       url: `${BACKEND_URL}/copilotkit`,
@@ -20,7 +22,7 @@ const runtime = new CopilotRuntime({
 
 export const POST = async (req: NextRequest) => {
   const { handleRequest } = copilotRuntimeNextJSAppRouterEndpoint({
-    runtime,
+    runtime: copilotRuntime,
     serviceAdapter,
     endpoint: "/api/copilotkit",
   });
