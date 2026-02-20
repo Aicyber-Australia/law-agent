@@ -16,7 +16,7 @@ from typing import Optional
 import httpx
 from bs4 import BeautifulSoup
 
-from app.config import logger
+from app.config import logger, AUSTLII_PROXY_URL, AUSTLII_PROXY_SECRET
 
 
 # Allowed hostnames for content fetching (SSRF protection)
@@ -64,7 +64,12 @@ class AustLIISearcher:
     }
 
     def __init__(self):
-        logger.info("AustLII searcher initialized")
+        self._proxy_url = AUSTLII_PROXY_URL
+        self._proxy_secret = AUSTLII_PROXY_SECRET
+        if self._proxy_url:
+            logger.info(f"AustLII searcher initialized (proxy: {self._proxy_url})")
+        else:
+            logger.info("AustLII searcher initialized (direct access)")
 
     async def search_legislation(
         self, query: str, state: str, max_results: int = 5
@@ -133,21 +138,11 @@ class AustLIISearcher:
             return None
 
         try:
-            async with httpx.AsyncClient(
-                headers=self.HEADERS, timeout=self.TIMEOUT, follow_redirects=True
-            ) as client:
-                response = await client.get(url)
-                response.raise_for_status()
+            html = await self._get_html("fetch", url=url)
+            if not html:
+                return None
 
-                # Verify final URL after redirects is still on AustLII
-                final_host = response.url.host
-                if final_host not in _ALLOWED_HOSTS:
-                    logger.warning(
-                        f"AustLII redirect to non-AustLII host blocked: {final_host}"
-                    )
-                    return None
-
-            soup = BeautifulSoup(response.text, "html.parser")
+            soup = BeautifulSoup(html, "html.parser")
 
             # AustLII puts legislative content in <article> tags
             article = soup.find("article")
@@ -199,17 +194,11 @@ class AustLIISearcher:
         }
 
         try:
-            async with httpx.AsyncClient(
-                headers=self.HEADERS, timeout=self.TIMEOUT, follow_redirects=True
-            ) as client:
-                response = await client.get(self.SEARCH_URL, params=params)
-                logger.info(
-                    f"AustLII search: status={response.status_code}, "
-                    f"size={len(response.text)} bytes, path={mask_path}"
-                )
-                response.raise_for_status()
+            html = await self._get_html("search", params=params)
+            if not html:
+                return []
 
-            results = self._parse_search_results(response.text)
+            results = self._parse_search_results(html)
             logger.info(f"AustLII parsed {len(results)} results for query='{query}'")
             return results
 
@@ -226,6 +215,96 @@ class AustLIISearcher:
         except Exception as e:
             logger.error(f"AustLII search error: {type(e).__name__}: {e}")
             return []
+
+    async def _get_html(
+        self,
+        action: str,
+        params: dict | None = None,
+        url: str | None = None,
+    ) -> Optional[str]:
+        """
+        Fetch HTML from AustLII, either directly or via the Vercel proxy.
+
+        Args:
+            action: "search" or "fetch"
+            params: Search query params (for action="search")
+            url: AustLII page URL (for action="fetch")
+
+        Returns:
+            Raw HTML string, or None on failure
+        """
+        if self._proxy_url:
+            return await self._get_html_via_proxy(action, params, url)
+        return await self._get_html_direct(action, params, url)
+
+    async def _get_html_via_proxy(
+        self,
+        action: str,
+        params: dict | None = None,
+        url: str | None = None,
+    ) -> Optional[str]:
+        """Fetch HTML via the Vercel proxy."""
+        body: dict = {"action": action}
+        if action == "search" and params:
+            body["params"] = params
+        elif action == "fetch" and url:
+            body["url"] = url
+
+        async with httpx.AsyncClient(timeout=self.TIMEOUT) as client:
+            response = await client.post(
+                self._proxy_url,
+                json=body,
+                headers={"x-proxy-secret": self._proxy_secret or ""},
+            )
+            response.raise_for_status()
+
+        data = response.json()
+
+        if "error" in data:
+            logger.error(f"AustLII proxy error: {data['error']}")
+            return None
+
+        html = data.get("html", "")
+        status = data.get("status", 0)
+        logger.info(
+            f"AustLII proxy: action={action}, status={status}, "
+            f"size={len(html)} bytes"
+        )
+        return html if html else None
+
+    async def _get_html_direct(
+        self,
+        action: str,
+        params: dict | None = None,
+        url: str | None = None,
+    ) -> Optional[str]:
+        """Fetch HTML directly from AustLII (local dev)."""
+        async with httpx.AsyncClient(
+            headers=self.HEADERS, timeout=self.TIMEOUT, follow_redirects=True
+        ) as client:
+            if action == "search" and params:
+                response = await client.get(self.SEARCH_URL, params=params)
+            elif action == "fetch" and url:
+                response = await client.get(url)
+            else:
+                return None
+
+            logger.info(
+                f"AustLII direct: action={action}, status={response.status_code}, "
+                f"size={len(response.text)} bytes"
+            )
+            response.raise_for_status()
+
+            # For fetch: verify final URL after redirects is still on AustLII
+            if action == "fetch":
+                final_host = response.url.host
+                if final_host not in _ALLOWED_HOSTS:
+                    logger.warning(
+                        f"AustLII redirect to non-AustLII host blocked: {final_host}"
+                    )
+                    return None
+
+            return response.text
 
     def _parse_search_results(self, html: str) -> list[dict]:
         """

@@ -35,3 +35,7 @@ if not SUPABASE_JWT_SECRET:
 # CORS configuration (comma-separated list of allowed origins)
 _cors_origins = os.environ.get("CORS_ORIGINS", "http://localhost:3000")
 CORS_ORIGINS = [origin.strip() for origin in _cors_origins.split(",") if origin.strip()]
+
+# Optional: AustLII proxy for deployed environments where AustLII blocks direct access
+AUSTLII_PROXY_URL = os.environ.get("AUSTLII_PROXY_URL")
+AUSTLII_PROXY_SECRET = os.environ.get("AUSTLII_PROXY_SECRET")
