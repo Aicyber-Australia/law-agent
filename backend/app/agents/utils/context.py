@@ -111,6 +111,29 @@ def extract_document_url(state: dict) -> Optional[str]:
     return None
 
 
+def extract_legal_topic(state: dict) -> str:
+    """
+    Extract legal topic from CopilotKit context.
+
+    Args:
+        state: Agent state dict containing 'copilotkit' key
+
+    Returns:
+        Topic slug like "parking_ticket", or "general" if not found
+    """
+    raw_value = extract_context_item(state, "legal topic")
+    cleaned = clean_context_value(raw_value)
+
+    if not cleaned:
+        return "general"
+
+    upper = cleaned.upper()
+    if "PARKING" in upper or "TICKET" in upper or "FINE" in upper:
+        return "parking_ticket"
+
+    return "general"
+
+
 def extract_ui_mode(state: dict) -> str:
     """
     Extract UI mode from CopilotKit context.

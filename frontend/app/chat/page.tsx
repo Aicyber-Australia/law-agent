@@ -16,6 +16,7 @@ import type { User } from "@supabase/supabase-js";
 import { StateSelector } from "../components/StateSelector";
 import { FileUpload } from "../components/FileUpload";
 import { ModeToggle } from "../components/ModeToggle";
+import { TopicSelector, type LegalTopic } from "../components/TopicSelector";
 import { useMode } from "../contexts/ModeContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -57,6 +58,7 @@ export default function ChatPage() {
     url: string;
     filename: string;
   } | null>(null);
+  const [legalTopic, setLegalTopic] = useState<LegalTopic>("general");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
 
@@ -115,6 +117,15 @@ export default function ChatPage() {
         : `User is in CHAT MODE. This is casual Q&A mode for quick legal questions. Be helpful and conversational.`,
   });
 
+  // Share legal topic with the Copilot agent
+  useCopilotReadable({
+    description: "The legal topic the user has selected",
+    value:
+      legalTopic === "parking_ticket"
+        ? `User has selected PARKING TICKET topic. They want help fighting a parking fine, traffic ticket, speeding fine, or similar infringement notice. Use the parking ticket playbook to guide them.`
+        : `User has not selected a specific legal topic. Provide general legal assistance.`,
+  });
+
   const handleFileUploaded = (url: string, filename: string) => {
     setUploadedDocument({ url, filename });
   };
@@ -161,8 +172,14 @@ export default function ChatPage() {
     window.location.reload();
   };
 
-  // Dynamic initial message based on selected state
+  // Dynamic initial message based on selected state and topic
   const getInitialMessage = () => {
+    if (legalTopic === "parking_ticket") {
+      if (userState) {
+        return `G'day! I'm here to help you challenge a fine or ticket in **${userState}**.\n\nI can help with:\n• Parking fines\n• Speeding tickets\n• Red light camera fines\n• Public transport fines\n• Council infringement notices\n\nWhat kind of ticket or fine are you dealing with?`;
+      }
+      return "G'day! I'm here to help you fight a fine or ticket. Please select your state/territory from the sidebar first — the appeal process varies by state.";
+    }
     if (userState) {
       return `G'day! I'm your AusLaw AI assistant. I see you're in **${userState}**.\n\nI can help you with:\n• Understanding your legal rights\n• Step-by-step guides for legal procedures\n• Finding a qualified lawyer\n\nHow can I assist you today?`;
     }
@@ -174,6 +191,12 @@ export default function ChatPage() {
     <div className="flex flex-col h-full gap-6">
       {/* Mode Toggle */}
       <ModeToggle />
+
+      {/* Legal Topic Selector */}
+      <TopicSelector
+        selectedTopic={legalTopic}
+        onTopicChange={setLegalTopic}
+      />
 
       {/* Divider */}
       <div className="h-px bg-slate-200" />
@@ -344,6 +367,9 @@ export default function ChatPage() {
         <div className="hidden lg:flex items-center justify-between px-6 py-3 border-b border-slate-200/60 bg-white/80 backdrop-blur-sm">
           <span className="text-sm font-medium text-slate-600">
             {mode === "analysis" ? "Case Analysis" : "Legal Chat"}
+            {legalTopic !== "general" && (
+              <span className="text-slate-400"> — Parking Ticket</span>
+            )}
           </span>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -380,14 +406,14 @@ export default function ChatPage() {
         <div className="flex-1 pt-14 lg:pt-0 flex flex-col min-h-0 overflow-hidden">
           {/* Welcome Section - shown only when conversation hasn't started */}
           {!conversationStarted && (
-            <WelcomeSection onTopicClick={() => { userSentMessage.current = true; setConversationStarted(true); }} />
+            <WelcomeSection legalTopic={legalTopic} onTopicClick={() => { userSentMessage.current = true; setConversationStarted(true); }} />
           )}
 
           {/* Chat area */}
           <CopilotChat
             className="flex-1 min-h-0"
             labels={{
-              title: mode === "analysis" ? "Case Analysis" : "Legal Chat",
+              title: `${mode === "analysis" ? "Case Analysis" : "Legal Chat"}${legalTopic !== "general" ? " — Parking Ticket" : ""}`,
               initial: getInitialMessage(),
             }}
             onSubmitMessage={() => {
@@ -411,10 +437,10 @@ export default function ChatPage() {
 /**
  * WelcomeSection - Welcome header with topic pill buttons
  */
-function WelcomeSection({ onTopicClick }: { onTopicClick: () => void }) {
+function WelcomeSection({ legalTopic, onTopicClick }: { legalTopic: LegalTopic; onTopicClick: () => void }) {
   const { appendMessage } = useCopilotChat();
 
-  const topics = [
+  const generalTopics = [
     {
       icon: Home,
       label: "What are my tenant rights?",
@@ -436,6 +462,31 @@ function WelcomeSection({ onTopicClick }: { onTopicClick: () => void }) {
       prompt: "What does Australian Consumer Law cover?",
     },
   ];
+
+  const parkingTicketTopics = [
+    {
+      icon: Home,
+      label: "I got a parking fine",
+      prompt: "I got a parking fine, what are my options to challenge it?",
+    },
+    {
+      icon: Briefcase,
+      label: "Speeding ticket options",
+      prompt: "I received a speeding ticket. What are my options to challenge it?",
+    },
+    {
+      icon: Users,
+      label: "Challenge a camera fine",
+      prompt: "Can I challenge a red light camera fine?",
+    },
+    {
+      icon: RefreshCw,
+      label: "Missed payment deadline",
+      prompt: "I missed the payment deadline on my fine. What can I do?",
+    },
+  ];
+
+  const topics = legalTopic === "parking_ticket" ? parkingTicketTopics : generalTopics;
 
   const handleTopicClick = async (prompt: string) => {
     onTopicClick(); // Hide welcome section immediately

@@ -16,6 +16,7 @@ from app.tools.lookup_law import lookup_law
 from app.tools.find_lawyer import find_lawyer
 from app.tools.analyze_document import analyze_document
 from app.tools.search_case_law import search_case_law
+from app.tools.get_action_template import get_action_template
 from app.config import logger
 
 
@@ -136,6 +137,58 @@ Laws vary significantly between Australian states.
 - Empathetic - they're dealing with a real problem"""
 
 
+# ---- Topic Playbooks (appended to base mode prompt when topic != "general") ----
+
+PARKING_TICKET_PLAYBOOK = """
+
+## PARKING TICKET / FINE CHALLENGE PLAYBOOK
+
+You are now helping the user fight a fine or infringement notice. Follow this structured approach:
+
+### Step 1: Understand the Ticket
+Gather these key details (ask ONE question at a time, don't interrogate):
+- What type of fine? (parking, speeding, red light camera, public transport, council, toll)
+- When did they receive it? What is the due date/deadline?
+- What is the amount?
+- What happened? (were they actually in the wrong, or are there mitigating factors?)
+- Have they already taken any action? (paid, requested review, ignored it)
+
+### Step 2: Identify Grounds for Challenge
+Based on the details, assess potential grounds:
+- **Procedural errors**: Wrong details on the notice (rego, date, location), missing info
+- **Signage issues**: No sign, obscured sign, confusing sign, recently changed
+- **Technical defences**: Camera calibration, unclear evidence, incorrect speed zone
+- **Mitigating circumstances**: Medical emergency, vehicle breakdown, genuine mistake
+- **First offence**: Many states allow leniency for first-time offenders
+- **Hardship**: Financial hardship provisions exist in most jurisdictions
+
+Use lookup_law to find the relevant infringement/fines legislation for their state.
+Use search_case_law to find relevant tribunal decisions about fine challenges.
+Use get_action_template to retrieve step-by-step checklists if available for their state.
+
+### Step 3: Action Plan with Deadlines
+Provide a clear, numbered plan. ALWAYS mention deadlines prominently:
+1. What to do first (usually: request an internal review — it's FREE)
+2. What evidence to gather (photos, receipts, medical certificates, etc.)
+3. How to write the review request (offer to help draft it)
+4. What happens if the review is rejected (tribunal/court options)
+5. Cost implications of each path
+
+### Step 4: Escalation
+If internal review fails, explain:
+- How to appeal to the relevant body (e.g., Fines Victoria, Revenue NSW, Magistrates' Court)
+- Filing fees and whether they're worth it vs the fine amount
+- What evidence strengthens their case at hearing
+- Free legal help: community legal centres, duty lawyers at court
+
+### Key Guidelines for This Topic
+- **Be encouraging but honest**: If grounds are weak, say so gently but suggest trying internal review anyway (it's free and sometimes works)
+- **Deadlines are critical**: Fines have strict time limits. Highlight these prominently
+- **Free first**: Internal review is always free. Mention this before paid options
+- **Don't assume guilt**: Approach from "let's see if there are grounds to challenge"
+- **State-specific**: Fine processes differ significantly by state — always use the correct state's process"""
+
+
 class QuickReplyAnalysis(BaseModel):
     """Analyze the conversation to suggest quick replies."""
     quick_replies: list[str] = Field(
@@ -212,7 +265,7 @@ async def generate_quick_replies(
         )
 
 
-def _create_chat_agent(user_state: str, has_document: bool, document_url: str = "", ui_mode: str = "chat"):
+def _create_chat_agent(user_state: str, has_document: bool, document_url: str = "", ui_mode: str = "chat", legal_topic: str = "general"):
     """Create a ReAct agent with tools for chat.
 
     Args:
@@ -220,13 +273,14 @@ def _create_chat_agent(user_state: str, has_document: bool, document_url: str = 
         has_document: Whether user has uploaded a document
         document_url: Actual URL of uploaded document (for analyze_document tool)
         ui_mode: "chat" for casual Q&A, "analysis" for guided intake
+        legal_topic: Legal domain ("general", "parking_ticket", etc.)
     """
     llm = ChatOpenAI(model="gpt-4o", temperature=0.3)
 
     # Tools available for chat
-    tools = [lookup_law, find_lawyer, analyze_document, search_case_law]
+    tools = [lookup_law, find_lawyer, analyze_document, search_case_law, get_action_template]
 
-    # Select system prompt based on UI mode
+    # Select base system prompt based on UI mode
     if ui_mode == "analysis":
         system_template = ANALYSIS_MODE_PROMPT
     else:
@@ -238,6 +292,13 @@ def _create_chat_agent(user_state: str, has_document: bool, document_url: str = 
         has_document="Yes" if has_document else "No",
         document_url=document_url or "None",
     )
+
+    # Append topic playbook if not general
+    topic_playbooks = {
+        "parking_ticket": PARKING_TICKET_PLAYBOOK,
+    }
+    if legal_topic in topic_playbooks:
+        system += topic_playbooks[legal_topic]
 
     # Create ReAct agent
     agent = create_react_agent(
@@ -273,12 +334,13 @@ async def chat_response_node(
     uploaded_document_url = state.get("uploaded_document_url", "")
     has_document = bool(uploaded_document_url)
     ui_mode = state.get("ui_mode", "chat")
+    legal_topic = state.get("legal_topic", "general")
 
-    logger.info(f"Chat response: user_state={user_state}, has_document={has_document}, document_url={uploaded_document_url}, ui_mode={ui_mode}")
+    logger.info(f"Chat response: user_state={user_state}, has_document={has_document}, document_url={uploaded_document_url}, ui_mode={ui_mode}, legal_topic={legal_topic}")
 
     try:
-        # Create agent with tools (mode-specific prompts)
-        agent = _create_chat_agent(user_state, has_document, uploaded_document_url, ui_mode)
+        # Create agent with tools (mode + topic-specific prompts)
+        agent = _create_chat_agent(user_state, has_document, uploaded_document_url, ui_mode, legal_topic)
 
         # Use config that hides tool calls but keeps message streaming
         # This prevents confusing UX where tool calls appear then disappear

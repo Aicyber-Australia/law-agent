@@ -13,9 +13,10 @@ Frontend (Next.js)  →  /api/copilotkit  →  FastAPI Backend  →  Supabase
      ↓                      ↓                    ↓
 CopilotChat         HttpAgent proxy      Custom LangGraph
 + StateSelector     (AG-UI protocol)     (CopilotKitState)
-+ FileUpload                                   ↓
-+ useCopilotReadable              Tools: lookup_law, find_lawyer,
-                                  analyze_document, search_case_law
++ TopicSelector                                ↓
++ FileUpload                  Tools: lookup_law, find_lawyer,
++ useCopilotReadable          analyze_document, search_case_law,
+                              get_action_template
 ```
 
 **Frontend**: Next.js 14 + CopilotKit + shadcn/ui + Tailwind CSS
@@ -26,6 +27,14 @@ CopilotChat         HttpAgent proxy      Custom LangGraph
 ## Development Commands
 
 ### Backend (requires conda environment `law_agent`)
+
+**Conda location**: `/Users/kevin/dev/tools/miniconda3`
+
+To run any backend command in a shell (since conda activate doesn't work directly in non-interactive shells):
+```bash
+source /Users/kevin/dev/tools/miniconda3/etc/profile.d/conda.sh && conda activate law_agent && <command>
+```
+
 ```bash
 cd backend
 conda activate law_agent
@@ -64,6 +73,7 @@ Run SQL files in Supabase SQL Editor:
 - `database/setup.sql` - Initial schema and mock data
 - `database/migration_v2.sql` - Adds action_templates table and state column
 - `database/migration_rag.sql` - pgvector schema for RAG
+- `database/migration_parking_ticket.sql` - Parking ticket action templates (VIC, NSW)
 
 ## Environment Variables
 
@@ -107,11 +117,13 @@ AustLII is a free public legal database operated by UNSW and UTS Law faculties. 
 - **Proxy**: AustLII blocks DigitalOcean IPs. In production, requests route through a Vercel API proxy (`/api/austlii-proxy`). Controlled by `AUSTLII_PROXY_URL` env var. When not set, direct access is used (works locally).
 
 ### CopilotKit Context Passing
-Frontend uses `useCopilotReadable` to share user's selected state and uploaded document URL. Backend reads from `state["copilotkit"]["context"]`.
+Frontend uses `useCopilotReadable` to share user's selected state, uploaded document URL, UI mode, and legal topic. Backend reads from `state["copilotkit"]["context"]`.
 
 **Bug Workaround**: AG-UI protocol double-serializes strings (e.g., `"\"NSW\""`). Use utilities from `app/agents/utils/context.py`:
 - `extract_user_state(state)` - Get Australian state code
 - `extract_document_url(state)` - Get uploaded document URL
+- `extract_ui_mode(state)` - Get UI mode ("chat" or "analysis")
+- `extract_legal_topic(state)` - Get legal topic ("general", "parking_ticket", etc.)
 - `clean_context_value(value)` - Strip extra quotes from raw values
 
 ### Suppressing Internal LLM Streaming
@@ -153,6 +165,7 @@ frontend/app/
 ├── chat/page.tsx               # Main chat page with sidebar + CopilotChat
 ├── components/
 │   ├── StateSelector.tsx       # Australian state/territory dropdown
+│   ├── TopicSelector.tsx       # Legal topic selector (General, Parking Ticket, etc.)
 │   ├── FileUpload.tsx          # Document upload to Supabase Storage
 │   ├── ModeToggle.tsx          # Chat/Analysis mode toggle
 │   └── AnalysisOutput.tsx      # Deep analysis results display
@@ -165,7 +178,7 @@ frontend/app/
 ### Key Frontend Patterns
 - **Mode-based theming**: CSS uses `[data-mode="chat"]` and `[data-mode="analysis"]` selectors for distinct visual styles
 - **Quick replies**: Agent state provides `quick_replies` array via `useCoAgent`, limited to 3 items in UI
-- **Topic pills**: Starter topic buttons shown before conversation begins, hidden after first message
+- **Topic pills**: Starter topic buttons shown before conversation begins, hidden after first message. Pills change based on selected legal topic
 - **CopilotKit styling**: Override classes like `.copilotKitMessages`, `.copilotKitInput` in globals.css
 
 ## Backend Structure
@@ -186,7 +199,7 @@ backend/
 │   │   ├── schemas/                  # Emergency resources
 │   │   └── utils/                    # Config helpers, context extraction
 │   ├── services/                     # RAG, AustLII search (with proxy support), reranking
-│   ├── tools/                        # lookup_law, find_lawyer, search_case_law, analyze_document
+│   ├── tools/                        # lookup_law, find_lawyer, search_case_law, analyze_document, get_action_template
 │   └── utils/                        # Document parsing, URL fetching
 ├── tests/
 └── scripts/                          # Data ingestion, RAG evaluation
@@ -222,13 +235,41 @@ initialize → brief_check_info ─┬→ brief_generate → END
 
 ### Key Features
 - **Safety Check**: Keyword detection first, LLM fallback only when uncertain
-- **Chat Response**: ReAct agent with tools: `lookup_law`, `find_lawyer`, `analyze_document`, `search_case_law`
+- **Chat Response**: ReAct agent with tools: `lookup_law`, `find_lawyer`, `analyze_document`, `search_case_law`, `get_action_template`
 - **Quick Replies**: 2-4 suggested follow-up options after each response
-- **Tool Usage**: Use `lookup_law` for legislation (RAG + AustLII fallback), `search_case_law` for court decisions (AustLII)
+- **Tool Usage**: Use `lookup_law` for legislation (RAG + AustLII fallback), `search_case_law` for court decisions (AustLII), `get_action_template` for step-by-step checklists
 - **AustLII Sources**: When results come from AustLII (source `"austlii"` or `"austlii_case"`), the LLM cites the source URL and notes the user should verify
 
 ### Analysis Mode
 Analysis mode uses the same ReAct agent and tools as chat mode, but with a different system prompt that guides a lawyer consultation flow (understand situation → explain law → suggest options). No separate graph nodes - purely prompt-driven.
+
+### Legal Topics (Domain Playbooks)
+Legal topic is a second axis orthogonal to mode. Mode controls *depth* (chat vs analysis), topic controls *domain*.
+
+```
+Sidebar:
+  Mode         [ Chat | Analysis ]              ← how deep
+  Legal Topic  [ General | Parking Ticket ]     ← what domain
+```
+
+**How it works:**
+- Frontend sends `legal_topic` via `useCopilotReadable` → backend extracts via `extract_legal_topic()`
+- `chat_response.py` composes the final system prompt: base prompt (mode) + topic playbook (appended)
+- When `legal_topic == "general"`, no playbook is appended (behaves as before)
+- When `legal_topic == "parking_ticket"`, `PARKING_TICKET_PLAYBOOK` is appended to the base prompt
+
+**Current topics:**
+- `general` — default, no playbook
+- `parking_ticket` — parking fines, speeding tickets, camera fines, infringement notices
+
+**Adding a new topic:**
+1. Add the topic value to `TopicSelector.tsx` TOPICS array
+2. Add a `useCopilotReadable` condition in `chat/page.tsx` for the new topic
+3. Add detection keyword in `extract_legal_topic()` in `context.py`
+4. Add a `NEW_TOPIC_PLAYBOOK` constant in `chat_response.py` and register it in the `topic_playbooks` dict
+5. Add action template data via SQL migration into `action_templates` table
+
+**`get_action_template` tool**: Queries the `action_templates` table by state + keyword matching. Returns step-by-step checklists for common legal procedures. Used by the agent when a topic playbook is active.
 
 ### Brief Generation Mode
 User clicks "Generate Brief" button to create a lawyer brief:
@@ -254,4 +295,4 @@ User clicks "Generate Brief" button to create a lawyer brief:
 ## Code Style
 
 - All comments and documentation must be in English
-- After completing code changes, generate a commit message summarizing the changes
+- After completing a plan, add a commit message that can be copied and pasted into the git commit command inside the summary.

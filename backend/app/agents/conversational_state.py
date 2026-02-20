@@ -32,6 +32,7 @@ class ConversationalState(TypedDict):
     # ---- Mode Control ----
     mode: Literal["chat", "brief"]  # Current operation mode
     ui_mode: Literal["chat", "analysis"]  # UI mode: casual chat vs guided analysis
+    legal_topic: str  # Legal topic/domain: "general", "parking_ticket", etc.
     is_first_message: bool  # First message in session (run safety check)
 
     # ---- Chat Response Metadata ----

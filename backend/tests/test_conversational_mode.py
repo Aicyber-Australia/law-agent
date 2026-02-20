@@ -8,7 +8,7 @@ from app.agents.conversational_graph import (
     get_conversational_graph,
     route_after_initialize,
 )
-from app.agents.utils import extract_user_state
+from app.agents.utils import extract_user_state, extract_legal_topic
 from app.agents.stages.safety_check_lite import (
     _check_crisis_keywords,
     _might_be_risky,
@@ -221,6 +221,44 @@ class TestContextExtraction:
             "error": None,
         }
         assert extract_user_state(state) == "VIC"
+
+
+class TestLegalTopicExtraction:
+    """Test legal topic extraction from CopilotKit context."""
+
+    def test_extract_parking_ticket_topic(self):
+        state = {
+            "copilotkit": {
+                "context": [
+                    {"description": "The legal topic the user has selected",
+                     "value": "User has selected PARKING TICKET topic. They want help fighting a fine."}
+                ]
+            }
+        }
+        assert extract_legal_topic(state) == "parking_ticket"
+
+    def test_extract_general_topic_default(self):
+        state = {
+            "copilotkit": {
+                "context": []
+            }
+        }
+        assert extract_legal_topic(state) == "general"
+
+    def test_extract_general_when_no_copilotkit(self):
+        state = {}
+        assert extract_legal_topic(state) == "general"
+
+    def test_extract_topic_with_fine_keyword(self):
+        state = {
+            "copilotkit": {
+                "context": [
+                    {"description": "The legal topic the user has selected",
+                     "value": "User wants help with a fine."}
+                ]
+            }
+        }
+        assert extract_legal_topic(state) == "parking_ticket"
 
 
 class TestConversationalGraphCompiles:

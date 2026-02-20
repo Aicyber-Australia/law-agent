@@ -25,7 +25,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
 from app.agents.conversational_state import ConversationalState, ConversationalOutput
-from app.agents.utils import extract_user_state, extract_document_url, extract_ui_mode
+from app.agents.utils import extract_user_state, extract_document_url, extract_ui_mode, extract_legal_topic
 from app.agents.stages.safety_check_lite import (
     safety_check_lite_node,
     route_after_safety_lite,
@@ -73,6 +73,7 @@ async def initialize_node(state: ConversationalState) -> dict:
     user_state = extract_user_state(state)
     uploaded_document_url = extract_document_url(state)
     ui_mode = extract_ui_mode(state)  # "chat" or "analysis"
+    legal_topic = extract_legal_topic(state)  # "general", "parking_ticket", etc.
 
     # Check if this is the first message (new session)
     is_first_message = len(messages) <= 1
@@ -87,7 +88,7 @@ async def initialize_node(state: ConversationalState) -> dict:
         f"Conversational init: session={session_id[:8]}, "
         f"query_length={len(current_query)}, user_state={user_state}, "
         f"has_document={bool(uploaded_document_url)}, first_msg={is_first_message}, "
-        f"brief_mode={is_brief_mode}, ui_mode={ui_mode}"
+        f"brief_mode={is_brief_mode}, ui_mode={ui_mode}, legal_topic={legal_topic}"
     )
 
     return {
@@ -98,6 +99,7 @@ async def initialize_node(state: ConversationalState) -> dict:
         "is_first_message": is_first_message,
         "mode": "brief" if is_brief_mode else "chat",
         "ui_mode": ui_mode,
+        "legal_topic": legal_topic,
     }
 
 

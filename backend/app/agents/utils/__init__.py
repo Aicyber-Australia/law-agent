@@ -7,6 +7,7 @@ from .context import (
     extract_user_state,
     extract_document_url,
     extract_ui_mode,
+    extract_legal_topic,
 )
 
 __all__ = [
@@ -17,4 +18,5 @@ __all__ = [
     "extract_user_state",
     "extract_document_url",
     "extract_ui_mode",
+    "extract_legal_topic",
 ]
