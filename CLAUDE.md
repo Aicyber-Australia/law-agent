@@ -74,6 +74,8 @@ SUPABASE_KEY=
 OPENAI_API_KEY=
 COHERE_API_KEY=              # Optional: for reranking
 ALLOWED_DOCUMENT_HOSTS=      # Required: your Supabase domain
+AUSTLII_PROXY_URL=           # Optional: Vercel proxy URL for deployed environments
+AUSTLII_PROXY_SECRET=        # Optional: shared secret for proxy auth
 ```
 
 Frontend `.env.local` file in `/frontend`:
@@ -81,16 +83,17 @@ Frontend `.env.local` file in `/frontend`:
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 BACKEND_URL=http://localhost:8000
+AUSTLII_PROXY_SECRET=        # Optional: must match backend if proxy is used
 ```
 
 ## Key Architecture Decisions
 
 ### RAG System + AustLII Fallback
-The `lookup_law` tool uses hybrid retrieval: vector similarity (pgvector) + full-text search + RRF fusion + optional Cohere reranking. When RAG returns no results or low-confidence results, it falls back to searching AustLII (Australian Legal Information Institute) for consolidated legislation.
+The `lookup_law` tool uses hybrid retrieval: vector similarity (pgvector) + full-text search + RRF fusion + optional Cohere reranking. All states are supported:
 
+- **States with RAG data** (NSW, QLD, FEDERAL, ACT): RAG first, AustLII fallback if RAG returns no/low-confidence results
+- **States without RAG data** (VIC, SA, WA, TAS, NT): AustLII searched directly (no wasted RAG call)
 - **Data Source**: Hugging Face `isaacus/open-australian-legal-corpus` (Primary Legislation)
-- **RAG Jurisdictions**: NSW, QLD, FEDERAL (other states not in corpus)
-- **AustLII Fallback**: Covers all states/territories when RAG has no or low-confidence results
 - **Chunking**: Parent chunks (2000 tokens) + Child chunks (500 tokens) for docs >= 10K chars
 
 ### AustLII Integration
@@ -101,6 +104,7 @@ AustLII is a free public legal database operated by UNSW and UTS Law faculties. 
 - **Case law search**: Searches court decisions via `au/cases/{state}`
 - **Endpoint**: `https://www.austlii.edu.au/cgi-bin/sinosrch.cgi` (GET with query params)
 - **SSRF protection**: URL validation before and after redirects, restricted to `austlii.edu.au` hosts
+- **Proxy**: AustLII blocks DigitalOcean IPs. In production, requests route through a Vercel API proxy (`/api/austlii-proxy`). Controlled by `AUSTLII_PROXY_URL` env var. When not set, direct access is used (works locally).
 
 ### CopilotKit Context Passing
 Frontend uses `useCopilotReadable` to share user's selected state and uploaded document URL. Backend reads from `state["copilotkit"]["context"]`.
@@ -143,16 +147,19 @@ AIMessage(content="...")
 
 ```
 frontend/app/
-├── chat/page.tsx           # Main chat page with sidebar + CopilotChat
+├── api/
+│   ├── copilotkit/route.ts     # CopilotKit AG-UI proxy to backend
+│   └── austlii-proxy/route.ts  # AustLII proxy for deployed environments
+├── chat/page.tsx               # Main chat page with sidebar + CopilotChat
 ├── components/
-│   ├── StateSelector.tsx   # Australian state/territory dropdown
-│   ├── FileUpload.tsx      # Document upload to Supabase Storage
-│   ├── ModeToggle.tsx      # Chat/Analysis mode toggle
-│   └── AnalysisOutput.tsx  # Deep analysis results display
+│   ├── StateSelector.tsx       # Australian state/territory dropdown
+│   ├── FileUpload.tsx          # Document upload to Supabase Storage
+│   ├── ModeToggle.tsx          # Chat/Analysis mode toggle
+│   └── AnalysisOutput.tsx      # Deep analysis results display
 ├── contexts/
-│   └── ModeContext.tsx     # App-wide mode state (chat | analysis)
-├── globals.css             # CopilotKit overrides, mode-based theming
-└── layout.tsx              # CopilotKit provider setup
+│   └── ModeContext.tsx         # App-wide mode state (chat | analysis)
+├── globals.css                 # CopilotKit overrides, mode-based theming
+└── layout.tsx                  # CopilotKit provider setup
 ```
 
 ### Key Frontend Patterns
@@ -178,7 +185,7 @@ backend/
 │   │   │   └── brief_flow.py         # Brief generation nodes
 │   │   ├── schemas/                  # Emergency resources
 │   │   └── utils/                    # Config helpers, context extraction
-│   ├── services/                     # RAG services, AustLII search, reranking
+│   ├── services/                     # RAG, AustLII search (with proxy support), reranking
 │   ├── tools/                        # lookup_law, find_lawyer, search_case_law, analyze_document
 │   └── utils/                        # Document parsing, URL fetching
 ├── tests/

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { CopilotChat } from "@copilotkit/react-ui";
@@ -138,6 +138,23 @@ export default function ChatPage() {
 
   // Track if conversation has started (to show/hide welcome section)
   const [conversationStarted, setConversationStarted] = useState(false);
+
+  // Auto-continue conversation when user selects a state after being prompted
+  const { appendMessage } = useCopilotChat();
+  const prevUserState = useRef(userState);
+  const userSentMessage = useRef(false);
+
+  useEffect(() => {
+    if (prevUserState.current === null && userState !== null && userSentMessage.current) {
+      appendMessage(
+        new TextMessage({
+          role: MessageRole.User,
+          content: `I've selected ${userState} as my state.`,
+        })
+      );
+    }
+    prevUserState.current = userState;
+  }, [userState, appendMessage]);
 
   // Reset conversation handler - reload page to start fresh
   const handleNewConversation = () => {
@@ -363,7 +380,7 @@ export default function ChatPage() {
         <div className="flex-1 pt-14 lg:pt-0 flex flex-col min-h-0 overflow-hidden">
           {/* Welcome Section - shown only when conversation hasn't started */}
           {!conversationStarted && (
-            <WelcomeSection onTopicClick={() => setConversationStarted(true)} />
+            <WelcomeSection onTopicClick={() => { userSentMessage.current = true; setConversationStarted(true); }} />
           )}
 
           {/* Chat area */}
@@ -372,6 +389,10 @@ export default function ChatPage() {
             labels={{
               title: mode === "analysis" ? "Case Analysis" : "Legal Chat",
               initial: getInitialMessage(),
+            }}
+            onSubmitMessage={() => {
+              userSentMessage.current = true;
+              setConversationStarted(true);
             }}
           />
         </div>
