@@ -15,16 +15,13 @@ from app.services.austlii_search import get_austlii_searcher
 from app.config import logger
 
 
-# State code to jurisdiction mapping
-STATE_TO_JURISDICTION = {
+# States with RAG data in our database
+RAG_JURISDICTIONS = {
     "NSW": "NSW",
     "QLD": "QLD",
     "FEDERAL": "FEDERAL",
     "ACT": "FEDERAL",  # ACT uses federal law primarily
 }
-
-# States not yet supported (no data in corpus)
-UNSUPPORTED_STATES = ["VIC", "SA", "WA", "TAS", "NT"]
 
 
 @tool
@@ -40,24 +37,29 @@ def lookup_law(query: str, state: str) -> str | list[dict]:
                'tenant bond refund rights', 'criminal sentencing guidelines').
         state: Australian state/territory code - REQUIRED. Use the user's selected
                state (NSW, QLD, VIC, SA, WA, TAS, NT, ACT, or FEDERAL).
-               For unsupported states (VIC, SA, WA, TAS, NT), falls back to
-               showing relevant Federal law.
 
     Returns:
         List of matching legal passages with citations and source URLs,
         or error message if search fails.
     """
     try:
-        # Map state to jurisdiction
-        jurisdiction = STATE_TO_JURISDICTION.get(state)
-        is_unsupported = state in UNSUPPORTED_STATES
+        # Check if we have RAG data for this state
+        jurisdiction = RAG_JURISDICTIONS.get(state)
+        has_rag = jurisdiction is not None
 
-        if is_unsupported:
-            jurisdiction = "FEDERAL"  # Fallback
+        logger.info(f"lookup_law: query='{query}', state='{state}', has_rag={has_rag}")
 
-        logger.info(f"lookup_law: query='{query}', state='{state}', jurisdiction='{jurisdiction}'")
+        # States without RAG data: search AustLII directly
+        if not has_rag:
+            logger.info(f"No RAG data for {state}, searching AustLII directly")
+            austlii_results = asyncio.run(
+                _austlii_legislation_fallback(query, state)
+            )
+            if austlii_results:
+                return austlii_results
+            return f"No legislation found for '{query}' in {state}. Try different keywords."
 
-        # Run async search in sync context
+        # States with RAG data: search RAG first
         results = asyncio.run(_search_and_rerank(query, jurisdiction))
 
         # Assess result quality and try AustLII fallback if needed
@@ -73,13 +75,9 @@ def lookup_law(query: str, state: str) -> str | list[dict]:
             )
             if fallback_results:
                 return fallback_results
-            # If AustLII also fails, fall through to return RAG results (if any)
 
         if not results:
-            msg = f"No legislation found for '{query}'"
-            if jurisdiction:
-                msg += f" in {state if not is_unsupported else 'Federal law'}"
-            return msg + ". Try different keywords or check another jurisdiction."
+            return f"No legislation found for '{query}' in {state}. Try different keywords."
 
         # Batch fetch all parent contents (single query instead of N queries)
         parent_contents = _get_parent_contents_batch(results)
@@ -113,14 +111,6 @@ def lookup_law(query: str, state: str) -> str | list[dict]:
                 "confidence": chunk.get("confidence", "unknown"),
             }
             formatted_results.append(result)
-
-        # Add note if showing federal law for unsupported state
-        if is_unsupported:
-            formatted_results.insert(0, {
-                "note": f"Note: {state} legislation is not yet available in our database. "
-                        f"Showing relevant Federal law instead. For state-specific advice, "
-                        f"please consult a legal professional."
-            })
 
         # Add metadata about result quality
         formatted_results.append({"result_quality": rag_quality})

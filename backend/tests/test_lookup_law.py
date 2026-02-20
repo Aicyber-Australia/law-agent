@@ -6,27 +6,18 @@ import pytest
 class TestLookupLaw:
     """Test the lookup_law tool functionality."""
 
-    def test_state_to_jurisdiction_mapping(self):
-        """Test that state codes map to correct jurisdictions."""
-        from app.tools.lookup_law import STATE_TO_JURISDICTION
+    def test_rag_jurisdictions_mapping(self):
+        """Test that RAG jurisdiction mappings are correct."""
+        from app.tools.lookup_law import RAG_JURISDICTIONS
 
-        assert STATE_TO_JURISDICTION.get("NSW") == "NSW"
-        assert STATE_TO_JURISDICTION.get("QLD") == "QLD"
-        assert STATE_TO_JURISDICTION.get("FEDERAL") == "FEDERAL"
-        assert STATE_TO_JURISDICTION.get("ACT") == "FEDERAL"  # ACT uses federal
-
-    def test_unsupported_states_defined(self):
-        """Test that unsupported states are correctly identified."""
-        from app.tools.lookup_law import UNSUPPORTED_STATES
-
-        assert "VIC" in UNSUPPORTED_STATES
-        assert "SA" in UNSUPPORTED_STATES
-        assert "WA" in UNSUPPORTED_STATES
-        assert "TAS" in UNSUPPORTED_STATES
-        assert "NT" in UNSUPPORTED_STATES
-        # Supported states should not be in unsupported list
-        assert "NSW" not in UNSUPPORTED_STATES
-        assert "QLD" not in UNSUPPORTED_STATES
+        assert RAG_JURISDICTIONS.get("NSW") == "NSW"
+        assert RAG_JURISDICTIONS.get("QLD") == "QLD"
+        assert RAG_JURISDICTIONS.get("FEDERAL") == "FEDERAL"
+        assert RAG_JURISDICTIONS.get("ACT") == "FEDERAL"  # ACT uses federal
+        # States without RAG data go to AustLII directly
+        assert RAG_JURISDICTIONS.get("VIC") is None
+        assert RAG_JURISDICTIONS.get("SA") is None
+        assert RAG_JURISDICTIONS.get("WA") is None
 
     def test_lookup_law_tool_exists(self):
         """Test that lookup_law tool is properly defined."""
