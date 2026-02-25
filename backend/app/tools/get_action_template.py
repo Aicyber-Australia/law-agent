@@ -68,12 +68,12 @@ def get_action_template(query: str, state: str, category: str = "") -> str | lis
         scored_results.sort(key=lambda x: x[0], reverse=True)
 
         if not scored_results:
-            # Return all templates for the state/category if no keyword match
-            scored_results = [(0, t) for t in response.data]
+            # Return best match from all templates if no keyword match
+            scored_results = [(0, t) for t in response.data[:1]]
 
-        # Format results
+        # Format results — return best match only to keep token usage low
         results = []
-        for _, template in scored_results[:3]:  # Top 3 matches
+        for _, template in scored_results[:1]:
             steps = template.get("steps", [])
             formatted_steps = []
             for step in sorted(steps, key=lambda s: s.get("order", 0)):
@@ -81,7 +81,6 @@ def get_action_template(query: str, state: str, category: str = "") -> str | lis
                     "step": step.get("order"),
                     "title": step.get("title"),
                     "description": step.get("description"),
-                    "details": step.get("details"),
                 })
 
             results.append({
