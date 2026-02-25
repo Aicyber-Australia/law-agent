@@ -1,20 +1,20 @@
 "use client";
 
-import { Globe, Car, Shield } from "lucide-react";
-import { cn } from "@/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Scale } from "lucide-react";
 
 export type LegalTopic = "general" | "parking_ticket" | "insurance_claim";
 
-interface TopicOption {
-  value: LegalTopic;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-}
-
-const TOPICS: TopicOption[] = [
-  { value: "general", label: "General", icon: Globe },
-  { value: "parking_ticket", label: "Parking Ticket", icon: Car },
-  { value: "insurance_claim", label: "Insurance Claim", icon: Shield },
+const TOPICS = [
+  { value: "general" as LegalTopic, label: "General" },
+  { value: "parking_ticket" as LegalTopic, label: "Parking Ticket" },
+  { value: "insurance_claim" as LegalTopic, label: "Insurance Claim" },
 ];
 
 interface TopicSelectorProps {
@@ -26,39 +26,28 @@ interface TopicSelectorProps {
 export function TopicSelector({
   selectedTopic,
   onTopicChange,
-  className,
 }: TopicSelectorProps) {
   return (
-    <div className={cn("space-y-3", className)}>
+    <div className="space-y-3">
       <div className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
         Legal Topic
       </div>
-
-      <div className="flex flex-wrap gap-2">
-        {TOPICS.map((topic) => {
-          const isActive = selectedTopic === topic.value;
-          return (
-            <button
-              key={topic.value}
-              onClick={() => onTopicChange(topic.value)}
-              className={cn(
-                "flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 cursor-pointer border",
-                isActive
-                  ? "bg-white border-slate-300 text-slate-900 shadow-sm"
-                  : "bg-transparent border-transparent text-slate-400 hover:text-slate-600 hover:bg-slate-50"
-              )}
-            >
-              <topic.icon
-                className={cn(
-                  "h-3.5 w-3.5 transition-colors",
-                  isActive ? "text-slate-700" : "text-slate-400"
-                )}
-              />
-              <span>{topic.label}</span>
-            </button>
-          );
-        })}
-      </div>
+      <Select
+        value={selectedTopic}
+        onValueChange={(v) => onTopicChange(v as LegalTopic)}
+      >
+        <SelectTrigger className="w-full h-10">
+          <Scale className="mr-2 h-4 w-4 text-muted-foreground" />
+          <SelectValue placeholder="Select a topic" />
+        </SelectTrigger>
+        <SelectContent>
+          {TOPICS.map((topic) => (
+            <SelectItem key={topic.value} value={topic.value}>
+              {topic.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
