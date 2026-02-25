@@ -260,6 +260,28 @@ class TestLegalTopicExtraction:
         }
         assert extract_legal_topic(state) == "parking_ticket"
 
+    def test_extract_insurance_claim_topic(self):
+        state = {
+            "copilotkit": {
+                "context": [
+                    {"description": "The legal topic the user has selected",
+                     "value": "User has selected INSURANCE CLAIM topic. They want help with a dispute."}
+                ]
+            }
+        }
+        assert extract_legal_topic(state) == "insurance_claim"
+
+    def test_extract_topic_with_insurance_keyword(self):
+        state = {
+            "copilotkit": {
+                "context": [
+                    {"description": "The legal topic the user has selected",
+                     "value": "User wants help with an insurance dispute."}
+                ]
+            }
+        }
+        assert extract_legal_topic(state) == "insurance_claim"
+
 
 class TestConversationalGraphCompiles:
     """Test that the graph compiles correctly."""

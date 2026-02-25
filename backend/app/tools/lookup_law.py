@@ -57,6 +57,14 @@ def lookup_law(query: str, state: str) -> str | list[dict]:
             )
             if austlii_results:
                 return austlii_results
+            # Try federal legislation if state-specific search found nothing
+            if state != "FEDERAL":
+                logger.info(f"No state results for {state}, trying FEDERAL legislation")
+                federal_results = asyncio.run(
+                    _austlii_legislation_fallback(query, "FEDERAL")
+                )
+                if federal_results:
+                    return federal_results
             return f"No legislation found for '{query}' in {state}. Try different keywords."
 
         # States with RAG data: search RAG first
@@ -75,6 +83,14 @@ def lookup_law(query: str, state: str) -> str | list[dict]:
             )
             if fallback_results:
                 return fallback_results
+            # Try federal legislation if state-specific fallback found nothing
+            if state != "FEDERAL":
+                logger.info(f"No AustLII results for {state}, trying FEDERAL legislation")
+                federal_results = asyncio.run(
+                    _austlii_legislation_fallback(query, "FEDERAL")
+                )
+                if federal_results:
+                    return federal_results
 
         if not results:
             return f"No legislation found for '{query}' in {state}. Try different keywords."

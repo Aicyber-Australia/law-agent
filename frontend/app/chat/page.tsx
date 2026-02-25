@@ -49,6 +49,10 @@ import {
   Users,
   RefreshCw,
   LogOut,
+  Shield,
+  DollarSign,
+  ArrowUpCircle,
+  Car,
 } from "lucide-react";
 
 export default function ChatPage() {
@@ -123,6 +127,8 @@ export default function ChatPage() {
     value:
       legalTopic === "parking_ticket"
         ? `User has selected PARKING TICKET topic. They want help fighting a parking fine, traffic ticket, speeding fine, or similar infringement notice. Use the parking ticket playbook to guide them.`
+        : legalTopic === "insurance_claim"
+        ? `User has selected INSURANCE CLAIM topic. They want help with an insurance claim dispute, denial, underpayment, or delay. Use the insurance claim playbook to guide them.`
         : `User has not selected a specific legal topic. Provide general legal assistance.`,
   });
 
@@ -174,6 +180,12 @@ export default function ChatPage() {
 
   // Dynamic initial message based on selected state and topic
   const getInitialMessage = () => {
+    if (legalTopic === "insurance_claim") {
+      if (userState) {
+        return `G'day! I'm here to help you with your insurance claim in **${userState}**.\n\nI can help with:\n• Denied insurance claims\n• Underpaid or delayed claims\n• Motor vehicle insurance disputes\n• Home & contents insurance issues\n• Escalating to AFCA (free)\n\nWhat's happening with your insurance claim?`;
+      }
+      return "G'day! I'm here to help you with your insurance claim. Please select your state/territory from the sidebar first — some consumer protection options vary by state.";
+    }
     if (legalTopic === "parking_ticket") {
       if (userState) {
         return `G'day! I'm here to help you challenge a fine or ticket in **${userState}**.\n\nI can help with:\n• Parking fines\n• Speeding tickets\n• Red light camera fines\n• Public transport fines\n• Council infringement notices\n\nWhat kind of ticket or fine are you dealing with?`;
@@ -368,7 +380,7 @@ export default function ChatPage() {
           <span className="text-sm font-medium text-slate-600">
             {mode === "analysis" ? "Case Analysis" : "Legal Chat"}
             {legalTopic !== "general" && (
-              <span className="text-slate-400"> — Parking Ticket</span>
+              <span className="text-slate-400"> — {legalTopic === "parking_ticket" ? "Parking Ticket" : "Insurance Claim"}</span>
             )}
           </span>
           <DropdownMenu>
@@ -413,7 +425,7 @@ export default function ChatPage() {
           <CopilotChat
             className="flex-1 min-h-0"
             labels={{
-              title: `${mode === "analysis" ? "Case Analysis" : "Legal Chat"}${legalTopic !== "general" ? " — Parking Ticket" : ""}`,
+              title: `${mode === "analysis" ? "Case Analysis" : "Legal Chat"}${legalTopic === "parking_ticket" ? " — Parking Ticket" : legalTopic === "insurance_claim" ? " — Insurance Claim" : ""}`,
               initial: getInitialMessage(),
             }}
             onSubmitMessage={() => {
@@ -486,7 +498,36 @@ function WelcomeSection({ legalTopic, onTopicClick }: { legalTopic: LegalTopic; 
     },
   ];
 
-  const topics = legalTopic === "parking_ticket" ? parkingTicketTopics : generalTopics;
+  const insuranceClaimTopics = [
+    {
+      icon: Shield,
+      label: "My claim was denied",
+      prompt: "My insurance claim was denied. What are my options to dispute this?",
+    },
+    {
+      icon: DollarSign,
+      label: "Insurer is underpaying",
+      prompt: "My insurer is underpaying my claim. What can I do?",
+    },
+    {
+      icon: ArrowUpCircle,
+      label: "How do I escalate to AFCA?",
+      prompt: "How do I escalate my insurance dispute to AFCA?",
+    },
+    {
+      icon: Car,
+      label: "Car accident insurance dispute",
+      prompt: "I'm having a dispute with my car insurance after an accident. What are my rights?",
+    },
+  ];
+
+  const topicPills: Record<string, typeof generalTopics> = {
+    general: generalTopics,
+    parking_ticket: parkingTicketTopics,
+    insurance_claim: insuranceClaimTopics,
+  };
+
+  const topics = topicPills[legalTopic] || generalTopics;
 
   const handleTopicClick = async (prompt: string) => {
     onTopicClick(); // Hide welcome section immediately

@@ -130,6 +130,8 @@ def extract_legal_topic(state: dict) -> str:
     upper = cleaned.upper()
     if "PARKING" in upper or "TICKET" in upper or "FINE" in upper:
         return "parking_ticket"
+    if "INSURANCE" in upper or "CLAIM" in upper:
+        return "insurance_claim"
 
     return "general"
 

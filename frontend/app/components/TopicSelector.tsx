@@ -1,9 +1,9 @@
 "use client";
 
-import { Globe, Car } from "lucide-react";
+import { Globe, Car, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type LegalTopic = "general" | "parking_ticket";
+export type LegalTopic = "general" | "parking_ticket" | "insurance_claim";
 
 interface TopicOption {
   value: LegalTopic;
@@ -14,6 +14,7 @@ interface TopicOption {
 const TOPICS: TopicOption[] = [
   { value: "general", label: "General", icon: Globe },
   { value: "parking_ticket", label: "Parking Ticket", icon: Car },
+  { value: "insurance_claim", label: "Insurance Claim", icon: Shield },
 ];
 
 interface TopicSelectorProps {

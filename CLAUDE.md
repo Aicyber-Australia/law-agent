@@ -74,6 +74,7 @@ Run SQL files in Supabase SQL Editor:
 - `database/migration_v2.sql` - Adds action_templates table and state column
 - `database/migration_rag.sql` - pgvector schema for RAG
 - `database/migration_parking_ticket.sql` - Parking ticket action templates (VIC, NSW)
+- `database/migration_insurance_claim.sql` - Insurance claim action templates (VIC, NSW)
 
 ## Environment Variables
 
@@ -261,6 +262,7 @@ Sidebar:
 **Current topics:**
 - `general` — default, no playbook
 - `parking_ticket` — parking fines, speeding tickets, camera fines, infringement notices
+- `insurance_claim` — denied/underpaid claims, AFCA escalation, motor vehicle disputes
 
 **Adding a new topic:**
 1. Add the topic value to `TopicSelector.tsx` TOPICS array
