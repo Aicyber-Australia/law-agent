@@ -5,6 +5,7 @@ including the workaround for AG-UI protocol's double-serialization bug.
 """
 
 import re
+import uuid
 from typing import Optional
 
 # Australian state codes
@@ -157,3 +158,47 @@ def extract_ui_mode(state: dict) -> str:
         return "analysis"
 
     return "chat"
+
+
+def extract_user_id(state: dict) -> Optional[str]:
+    """
+    Extract authenticated user id from CopilotKit context.
+
+    Args:
+        state: Agent state dict containing 'copilotkit' key
+
+    Returns:
+        UUID string or None if not found
+    """
+    raw_value = extract_context_item(state, "authenticated user id")
+    cleaned = clean_context_value(raw_value)
+    if not cleaned:
+        return None
+    normalized = cleaned.strip()
+    if normalized.lower() in {"unknown", "none", "null"}:
+        return None
+    try:
+        return str(uuid.UUID(normalized))
+    except Exception:
+        return None
+
+
+def extract_thread_id(state: dict) -> Optional[str]:
+    """
+    Extract conversation/thread id from CopilotKit context.
+
+    Args:
+        state: Agent state dict containing 'copilotkit' key
+
+    Returns:
+        Thread id string or None if not found
+    """
+    raw_value = (
+        extract_context_item(state, "conversation/thread id")
+        or extract_context_item(state, "thread id")
+        or extract_context_item(state, "conversation id")
+    )
+    cleaned = clean_context_value(raw_value)
+    if not cleaned:
+        return None
+    return cleaned.strip()

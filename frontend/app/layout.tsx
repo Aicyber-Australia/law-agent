@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { CopilotKit } from "@copilotkit/react-core";
 import "@copilotkit/react-ui/styles.css";
 import "./globals.css";
 import { ModeProvider } from "./contexts/ModeContext";
@@ -61,10 +60,7 @@ export default function RootLayout({
   return (
     <html lang="en-AU">
       <body>
-        {/* Connect via Next.js API route to Python backend */}
-        <CopilotKit runtimeUrl="/api/copilotkit" agent="auslaw_agent">
-          <ModeProvider>{children}</ModeProvider>
-        </CopilotKit>
+        <ModeProvider>{children}</ModeProvider>
       </body>
     </html>
   );

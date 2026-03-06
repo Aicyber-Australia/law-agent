@@ -2,6 +2,7 @@ fastapi>=0.115.0
 uvicorn>=0.31.1
 langchain-openai>=1.0.0
 langgraph>=1.0.0
+langgraph-checkpoint-postgres>=2.0.0
 copilotkit>=0.1.77
 ag-ui-langgraph>=0.0.24
 supabase>=2.0.0
@@ -13,6 +14,10 @@ python-multipart>=0.0.21
 httpx>=0.28.1
 slowapi>=0.1.9
 PyJWT[crypto]>=2.8.0
+redis>=5.2.0
+reportlab>=4.2.5
+Markdown>=3.7
+sentry-sdk[fastapi]>=2.18.0
 
 # RAG dependencies
 openai>=1.10.0

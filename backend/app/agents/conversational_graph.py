@@ -17,15 +17,24 @@ Flow (brief mode - triggered by user button):
     initialize -> brief_check_info -> [brief_ask_questions | brief_generate] -> END
 """
 
+import os
 import uuid
-from typing import Literal
+from typing import Literal, Any
 
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 
 from app.agents.conversational_state import ConversationalState, ConversationalOutput
-from app.agents.utils import extract_user_state, extract_document_url, extract_ui_mode, extract_legal_topic
+from app.agents.utils import (
+    extract_user_state,
+    extract_user_id,
+    extract_thread_id,
+    extract_document_url,
+    extract_ui_mode,
+    extract_legal_topic,
+)
 from app.agents.stages.safety_check_lite import (
     safety_check_lite_node,
     route_after_safety_lite,
@@ -37,7 +46,13 @@ from app.agents.stages.brief_flow import (
     brief_ask_questions_node,
     brief_generate_node,
 )
-from app.config import logger
+from app.config import logger, LANGGRAPH_DB_URL
+from app.db.production_store import create_conversation, add_message, get_conversation_owner
+
+try:
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
+except Exception:  # pragma: no cover
+    AsyncPostgresSaver = None
 
 
 # Brief generation trigger marker (sent from frontend)
@@ -51,7 +66,24 @@ GENERATE_NOW_TRIGGER = "[GENERATE_NOW]"
 # Graph Nodes
 # ============================================
 
-async def initialize_node(state: ConversationalState) -> dict:
+def _thread_id_from_config(config: RunnableConfig | None) -> str | None:
+    """Extract canonical thread id from LangGraph runtime config when available."""
+    if not config:
+        return None
+    configurable: dict[str, Any] = config.get("configurable", {}) or {}
+    candidates = [
+        configurable.get("thread_id"),
+        configurable.get("threadId"),
+        configurable.get("conversation_id"),
+        configurable.get("conversationId"),
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+async def initialize_node(state: ConversationalState, config: RunnableConfig | None = None) -> dict:
     """
     Initialize state with session ID, extract query and CopilotKit context.
 
@@ -67,9 +99,13 @@ async def initialize_node(state: ConversationalState) -> dict:
             current_query = msg.content
             break
 
-    session_id = state.get("session_id") or str(uuid.uuid4())
-
     # Extract CopilotKit context
+    user_id = extract_user_id(state)
+    thread_id = extract_thread_id(state) or _thread_id_from_config(config)
+    session_id = thread_id or state.get("session_id") or str(uuid.uuid4())
+    if not user_id and session_id:
+        user_id = get_conversation_owner(session_id)
+
     user_state = extract_user_state(state)
     uploaded_document_url = extract_document_url(state)
     ui_mode = extract_ui_mode(state)  # "chat" or "analysis"
@@ -86,13 +122,42 @@ async def initialize_node(state: ConversationalState) -> dict:
 
     logger.info(
         f"Conversational init: session={session_id[:8]}, "
+        f"user_id={'present' if user_id else 'missing'}, "
         f"query_length={len(current_query)}, user_state={user_state}, "
         f"has_document={bool(uploaded_document_url)}, first_msg={is_first_message}, "
         f"brief_mode={is_brief_mode}, ui_mode={ui_mode}, legal_topic={legal_topic}"
     )
 
+    # Persist conversation and user message for resumability/audit.
+    if user_id:
+        try:
+            create_conversation(
+                user_id=user_id,
+                conversation_id=session_id,
+                title="New Conversation",
+                ui_mode=ui_mode,
+                legal_topic=legal_topic,
+                user_state=user_state,
+            )
+            if current_query.strip():
+                add_message(
+                    user_id=user_id,
+                    conversation_id=session_id,
+                    role="user",
+                    content=current_query,
+                    metadata={
+                        "ui_mode": ui_mode,
+                        "legal_topic": legal_topic,
+                        "is_brief_trigger": is_brief_mode,
+                    },
+                    run_config=config,
+                )
+        except Exception as exc:
+            logger.warning("Failed to persist user message for session %s: %s", session_id, exc)
+
     return {
         "session_id": session_id,
+        "user_id": user_id,
         "current_query": current_query,
         "user_state": user_state,
         "uploaded_document_url": uploaded_document_url,
@@ -113,6 +178,14 @@ def route_after_initialize(state: ConversationalState) -> Literal["brief", "chec
     """
     # Brief mode bypasses normal flow
     if state.get("mode") == "brief":
+        return "brief"
+
+    # Keep follow-up answers inside brief flow while intake is still active.
+    # This prevents normal chat routing from taking over between brief questions.
+    pending_questions = state.get("brief_pending_questions") or []
+    brief_questions_asked = int(state.get("brief_questions_asked") or 0)
+    brief_info_complete = bool(state.get("brief_info_complete", False))
+    if pending_questions or (brief_questions_asked > 0 and not brief_info_complete):
         return "brief"
 
     # Always check on first message
@@ -242,15 +315,62 @@ def build_conversational_graph():
     return workflow
 
 
-def create_conversational_agent():
-    """Create the compiled conversational agent graph with memory."""
+def create_conversational_agent(checkpointer=None):
+    """Create the compiled conversational agent graph with provided checkpointer."""
     workflow = build_conversational_graph()
+    return workflow.compile(checkpointer=checkpointer or MemorySaver())
+
+
+async def initialize_conversational_graph() -> None:
+    """Initialize graph and prefer async Postgres checkpointer when configured."""
+    global _conversational_graph
+    global _postgres_async_saver_cm
+
     checkpointer = MemorySaver()
-    return workflow.compile(checkpointer=checkpointer)
+    db_url = LANGGRAPH_DB_URL or os.environ.get("LANGGRAPH_DB_URL")
+
+    if db_url and AsyncPostgresSaver is not None:
+        try:
+            saver_cm = AsyncPostgresSaver.from_conn_string(db_url)
+            saver = await saver_cm.__aenter__()
+            await saver.setup()
+            _postgres_async_saver_cm = saver_cm
+            checkpointer = saver
+            logger.info("Using Postgres checkpointer for conversational graph")
+        except Exception as exc:
+            logger.warning(
+                "Failed to initialize async Postgres checkpointer (%s); using memory checkpointer",
+                exc,
+            )
+            if _postgres_async_saver_cm is not None:
+                try:
+                    await _postgres_async_saver_cm.__aexit__(None, None, None)
+                except Exception:
+                    pass
+                _postgres_async_saver_cm = None
+    elif db_url and AsyncPostgresSaver is None:
+        logger.warning(
+            "LANGGRAPH_DB_URL is set but langgraph.checkpoint.postgres.aio is unavailable; using memory checkpointer"
+        )
+
+    _conversational_graph = create_conversational_agent(checkpointer=checkpointer)
+
+
+async def shutdown_conversational_graph() -> None:
+    """Close async Postgres checkpointer context if opened."""
+    global _postgres_async_saver_cm
+    if _postgres_async_saver_cm is not None:
+        try:
+            await _postgres_async_saver_cm.__aexit__(None, None, None)
+        except Exception as exc:
+            logger.warning("Failed to close Postgres checkpointer cleanly (%s)", exc)
+        finally:
+            _postgres_async_saver_cm = None
 
 
 # Singleton compiled graph
 _conversational_graph = None
+_postgres_async_saver_cm = None
 
 
 def get_conversational_graph():

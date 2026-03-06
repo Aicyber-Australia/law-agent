@@ -18,6 +18,7 @@ from app.tools.analyze_document import analyze_document
 from app.tools.search_case_law import search_case_law
 from app.tools.get_action_template import get_action_template
 from app.config import logger
+from app.db.production_store import add_message, touch_conversation
 
 
 # System prompt for CHAT MODE - natural conversation, casual Q&A
@@ -389,13 +390,21 @@ async def chat_response_node(
         dict with messages and quick_replies
     """
     messages = state.get("messages", [])
+    user_id = state.get("user_id")
+    session_id = state.get("session_id")
     user_state = state.get("user_state")
     uploaded_document_url = state.get("uploaded_document_url", "")
     has_document = bool(uploaded_document_url)
     ui_mode = state.get("ui_mode", "chat")
     legal_topic = state.get("legal_topic", "general")
 
-    logger.info(f"Chat response: user_state={user_state}, has_document={has_document}, document_url={uploaded_document_url}, ui_mode={ui_mode}, legal_topic={legal_topic}")
+    logger.info(
+        "Chat response: user_state=%s, has_document=%s, ui_mode=%s, legal_topic=%s",
+        user_state,
+        has_document,
+        ui_mode,
+        legal_topic,
+    )
 
     try:
         # Create agent with tools (mode + topic-specific prompts)
@@ -427,6 +436,29 @@ async def chat_response_node(
             response_content,
             config,
         )
+
+        if user_id and session_id:
+            try:
+                add_message(
+                    user_id=user_id,
+                    conversation_id=session_id,
+                    role="assistant",
+                    content=response_content,
+                    metadata={
+                        "message_id": getattr(final_message, "id", None),
+                        "ui_mode": ui_mode,
+                        "legal_topic": legal_topic,
+                    },
+                )
+                touch_conversation(
+                    user_id=user_id,
+                    conversation_id=session_id,
+                    ui_mode=ui_mode,
+                    legal_topic=legal_topic,
+                    user_state=user_state,
+                )
+            except Exception as exc:
+                logger.warning("Failed to persist assistant message for %s: %s", session_id, exc)
 
         return {
             "messages": [final_message],

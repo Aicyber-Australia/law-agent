@@ -82,6 +82,7 @@ Backend `.env` file in `/backend`:
 ```
 SUPABASE_URL=
 SUPABASE_KEY=
+SUPABASE_JWT_SECRET=         # Required: for /copilotkit endpoint auth
 OPENAI_API_KEY=
 COHERE_API_KEY=              # Optional: for reranking
 ALLOWED_DOCUMENT_HOSTS=      # Required: your Supabase domain
@@ -151,6 +152,12 @@ AIMessage(content="...", id=f"analysis_offer_{uuid.uuid4().hex[:8]}")
 AIMessage(content="...")
 ```
 
+### Authentication & Rate Limiting
+- `app/auth.py` verifies Supabase JWTs using JWKS (ECC/RSA) with HS256 fallback
+- `CopilotKitMiddleware` in `main.py` enforces auth + rate limiting (30 req/min in-memory) on `/copilotkit` endpoint
+- Frontend `middleware.ts` protects `/chat` route (redirects unauthenticated users to `/login`)
+- Frontend auth pages: `/login` (email/password + Google OAuth), `/signup`, `/auth/callback`
+
 ### Document Upload Flow
 1. Frontend uploads to Supabase Storage bucket `documents`
 2. Public URL shared with agent via `useCopilotReadable`
@@ -160,10 +167,14 @@ AIMessage(content="...")
 
 ```
 frontend/app/
+├── page.tsx                       # Landing page
+├── login/page.tsx                 # Email/password + Google OAuth login
+├── signup/page.tsx                # User registration
+├── auth/callback/route.ts         # OAuth callback handler
 ├── api/
-│   ├── copilotkit/route.ts     # CopilotKit AG-UI proxy to backend
-│   └── austlii-proxy/route.ts  # AustLII proxy for deployed environments
-├── chat/page.tsx               # Main chat page with sidebar + CopilotChat
+│   ├── copilotkit/route.ts        # CopilotKit AG-UI proxy to backend
+│   └── austlii-proxy/route.ts     # AustLII proxy for deployed environments
+├── chat/page.tsx                  # Main chat page with sidebar + CopilotChat
 ├── components/
 │   ├── StateSelector.tsx       # Australian state/territory dropdown
 │   ├── TopicSelector.tsx       # Legal topic selector (General, Parking Ticket, etc.)
@@ -293,6 +304,13 @@ User clicks "Generate Brief" button to create a lawyer brief:
 - `[GENERATE_NOW]` - Early generation request
 
 ---
+
+## Deployment
+
+- GitHub Actions workflow: `.github/workflows/deploy-backend.yml`
+- Triggers on push to `main` when `backend/**` changes
+- Deploys via SSH to DigitalOcean Droplet (Docker build + restart)
+- AustLII blocks DigitalOcean IPs, so production uses the Vercel API proxy (`AUSTLII_PROXY_URL`)
 
 ## Code Style
 

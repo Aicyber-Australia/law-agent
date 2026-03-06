@@ -48,23 +48,32 @@ An Australian Legal Assistant MVP that provides legal information, lawyer matchi
    Create `backend/.env`:
    ```
    SUPABASE_URL=your_supabase_url
-   SUPABASE_KEY=your_supabase_key
+   SUPABASE_KEY=your_supabase_service_role_key
    OPENAI_API_KEY=your_openai_key
+   SUPABASE_JWT_SECRET=your_supabase_jwt_secret
    COHERE_API_KEY=your_cohere_key  # Optional: for reranking
+   REDIS_URL=redis://localhost:6379/0  # Optional in local
+   LANGGRAPH_DB_URL=postgresql://user:pass@host:5432/dbname  # For Postgres checkpoints
+   BRIEF_PDF_BUCKET=briefs
+   DOCUMENTS_BUCKET=documents
+   RETENTION_DAYS=90
+   ALLOWED_DOCUMENT_HOSTS=your-project.supabase.co
    ```
 
    Create `frontend/.env.local`:
    ```
    NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
    NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+   NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+   BACKEND_URL=http://localhost:8000
    ```
 
 3. **Database setup**
 
-   Run the following SQL files in Supabase SQL Editor:
-   - `database/setup.sql` - Initial schema and mock data
-   - `database/migration_v2.sql` - Action templates table
-   - `database/migration_rag.sql` - pgvector schema for RAG
+   Use Supabase SQL migrations as the source of truth:
+   - `supabase/migrations/20260306110000_production_foundation.sql` (conversations/messages/briefs/documents/audit/retention + RLS)
+
+   Historical files under `database/*.sql` remain as bootstrap references.
 
 4. **Ingest legal corpus** (optional, for RAG)
    ```bash
@@ -83,6 +92,13 @@ An Australian Legal Assistant MVP that provides legal information, lawyer matchi
    ```
 
 6. Open http://localhost:3000
+
+7. **Retention cleanup** (optional cron/ops task)
+   ```bash
+   cd backend
+   conda activate law_agent
+   python scripts/run_retention.py
+   ```
 
 ## Architecture
 

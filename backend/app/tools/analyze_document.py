@@ -1,10 +1,18 @@
 """Fetch document tool - fetches and parses uploaded documents for agent analysis."""
 
 from typing import Optional
+from urllib.parse import urlparse
 from langchain_core.tools import tool
 
 from app.config import logger
 from app.utils.url_fetcher import fetch_and_parse_document
+
+
+def _safe_url_for_logs(url: str) -> str:
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return "invalid-url"
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
 
 
 @tool
@@ -28,7 +36,7 @@ def analyze_document(
     """
     # If URL provided, fetch and parse the document
     if document_url:
-        logger.info(f"analyze_document called with URL: {document_url}")
+        logger.info("analyze_document called with URL: %s", _safe_url_for_logs(document_url))
         try:
             document_text, content_type = fetch_and_parse_document(document_url)
             logger.info(f"Fetched document: type={content_type}, length={len(document_text)}")

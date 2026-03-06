@@ -65,6 +65,17 @@ def is_safe_url(url: str) -> bool:
         return False
 
 
+def _safe_url_for_logs(url: str) -> str:
+    """Drop query fragments from URLs to avoid leaking signed tokens in logs."""
+    try:
+        parsed = urlparse(url)
+        if not parsed.scheme or not parsed.netloc:
+            return "invalid-url"
+        return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    except Exception:
+        return "invalid-url"
+
+
 def fetch_and_parse_document(url: str) -> tuple[str, str]:
     """
     Fetch a document from a URL and parse it.
@@ -78,14 +89,14 @@ def fetch_and_parse_document(url: str) -> tuple[str, str]:
     """
     # SSRF protection: validate URL before fetching
     if not is_safe_url(url):
-        logger.warning(f"Blocked potentially unsafe URL: {url}")
+        logger.warning("Blocked potentially unsafe URL: %s", _safe_url_for_logs(url))
         raise ValueError("URL not allowed. Only trusted storage URLs are permitted.")
 
     try:
         # Extract filename from URL (remove query params)
         filename = url.split("/")[-1].split("?")[0]
 
-        logger.info(f"Fetching document from URL: {url}")
+        logger.info("Fetching document from URL: %s", _safe_url_for_logs(url))
 
         # Fetch with redirect limit and streaming for size check
         with httpx.Client(
@@ -121,10 +132,10 @@ def fetch_and_parse_document(url: str) -> tuple[str, str]:
         return parsed_content, content_type
 
     except httpx.HTTPStatusError as e:
-        logger.error(f"HTTP error fetching URL {url}: {e}")
+        logger.error("HTTP error fetching URL %s: %s", _safe_url_for_logs(url), e)
         raise ValueError(f"Failed to fetch document: HTTP {e.response.status_code}")
     except httpx.RequestError as e:
-        logger.error(f"Request error fetching URL {url}: {e}")
+        logger.error("Request error fetching URL %s: %s", _safe_url_for_logs(url), e)
         raise ValueError(f"Failed to fetch document: {str(e)}")
     except Exception as e:
         logger.error(f"Error fetching/parsing document from URL: {e}")

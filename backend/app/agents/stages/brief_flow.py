@@ -18,6 +18,12 @@ from langchain_core.runnables import RunnableConfig
 from app.agents.conversational_state import ConversationalState
 from app.agents.utils import get_internal_llm_config
 from app.config import logger
+from app.db.production_store import add_message, save_brief, touch_conversation
+
+try:
+    import markdown as markdown_lib  # type: ignore
+except Exception:  # pragma: no cover
+    markdown_lib = None
 
 
 # ============================================
@@ -330,6 +336,14 @@ async def brief_check_info_node(
     existing_missing = state.get("brief_missing_info") or []
     existing_unknown = state.get("brief_unknown_info") or []
     pending_questions = state.get("brief_pending_questions") or []
+    current_index = int(state.get("brief_current_question_index") or 0)
+    total_questions = int(state.get("brief_total_questions") or 0)
+
+    question_round_completed = (
+        total_questions > 0
+        and current_index >= total_questions
+        and not pending_questions
+    )
 
     logger.info(f"Brief check: analyzing {len(messages)} messages, pending_questions={len(pending_questions)}")
 
@@ -364,6 +378,16 @@ async def brief_check_info_node(
                 "brief_info_complete": False,
             }
         else:
+            if question_round_completed:
+                logger.info(
+                    "Brief intake question round completed with skip responses; generating with available info"
+                )
+                return {
+                    "brief_missing_info": new_missing,
+                    "brief_unknown_info": new_unknown,
+                    "brief_info_complete": True,
+                    "brief_pending_questions": [],
+                }
             # No more pending questions - check if we need to re-analyze
             is_complete = len(new_missing) == 0
             return {
@@ -379,6 +403,19 @@ async def brief_check_info_node(
         return {
             "brief_info_complete": False,
             # Keep existing state - brief_ask_questions_node will use pending_questions
+        }
+
+    # Completed one full question round; proceed to generation with available info
+    # to avoid repetitive intake loops.
+    if question_round_completed:
+        logger.info(
+            "Brief intake round complete (%s/%s); proceeding to generate brief",
+            current_index,
+            total_questions,
+        )
+        return {
+            "brief_info_complete": True,
+            "brief_pending_questions": [],
         }
 
     # No pending questions - need to analyze conversation to extract facts
@@ -579,6 +616,8 @@ async def brief_generate_node(
         dict with messages (formatted brief) and mode reset to "chat"
     """
     messages = state.get("messages", [])
+    user_id = state.get("user_id")
+    session_id = state.get("session_id")
     user_state = state.get("user_state", "Not specified")
     facts = state.get("brief_facts_collected", {})
     unknown_info = state.get("brief_unknown_info") or []
@@ -607,6 +646,41 @@ async def brief_generate_node(
 
         # Format brief as readable message (include unknown items)
         formatted_brief = _format_brief_as_message(brief, user_state, unknown_info)
+        latest_brief_id = None
+
+        if user_id and session_id:
+            try:
+                html_content = _render_html_from_markdown(formatted_brief)
+                saved_brief = save_brief(
+                    user_id=user_id,
+                    conversation_id=session_id,
+                    structured_json=brief.model_dump(),
+                    markdown_content=formatted_brief,
+                    html_content=html_content,
+                    status="generated",
+                )
+                latest_brief_id = saved_brief.get("id")
+
+                add_message(
+                    user_id=user_id,
+                    conversation_id=session_id,
+                    role="assistant",
+                    content=formatted_brief,
+                    metadata={
+                        "message_id": f"brief_generated_{uuid.uuid4().hex[:8]}",
+                        "brief_id": latest_brief_id,
+                        "brief_version": saved_brief.get("version"),
+                    },
+                )
+                touch_conversation(
+                    user_id=user_id,
+                    conversation_id=session_id,
+                    ui_mode=state.get("ui_mode"),
+                    legal_topic=state.get("legal_topic"),
+                    user_state=user_state,
+                )
+            except Exception as exc:
+                logger.warning("Failed to persist generated brief for session %s: %s", session_id, exc)
 
         logger.info(
             f"Brief generated: area={brief.legal_area}, "
@@ -619,12 +693,18 @@ async def brief_generate_node(
                 id=f"brief_generated_{uuid.uuid4().hex[:8]}"
             )],
             "mode": "chat",  # Return to chat mode
+            "brief_info_complete": True,
+            "brief_pending_questions": [],
+            "brief_current_question_index": 0,
+            "brief_total_questions": 0,
+            "brief_questions_asked": 0,
             "quick_replies": [
                 "Find me a lawyer",
                 "What should I ask the lawyer?",
                 "Explain the urgency",
             ],
             "suggest_lawyer": True,
+            "latest_brief_id": latest_brief_id,
         }
 
     except Exception as e:
@@ -636,6 +716,11 @@ async def brief_generate_node(
                 id=f"brief_error_{uuid.uuid4().hex[:8]}"
             )],
             "mode": "chat",
+            "brief_info_complete": True,
+            "brief_pending_questions": [],
+            "brief_current_question_index": 0,
+            "brief_total_questions": 0,
+            "brief_questions_asked": 0,
             "quick_replies": ["Find me a lawyer", "Try again", "What can you help with?"],
         }
 
@@ -687,6 +772,15 @@ def _format_facts_for_prompt(facts: dict) -> str:
             parts.append(f"- {goal}")
 
     return "\n".join(parts)
+
+
+def _render_html_from_markdown(markdown_text: str) -> str:
+    """Convert markdown brief content to HTML for persistence/export."""
+    if markdown_lib is not None:
+        return markdown_lib.markdown(markdown_text)
+    # Fallback minimal wrapper if markdown dependency is unavailable.
+    escaped = markdown_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return f"<pre>{escaped}</pre>"
 
 
 def _format_brief_as_message(

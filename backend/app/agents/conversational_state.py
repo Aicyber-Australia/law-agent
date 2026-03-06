@@ -22,6 +22,7 @@ class ConversationalState(TypedDict):
 
     # ---- Session & Context ----
     session_id: str
+    user_id: Optional[str]
     user_state: Optional[str]  # Australian state/territory (NSW, VIC, etc.)
     uploaded_document_url: Optional[str]
 
@@ -60,6 +61,9 @@ class ConversationalState(TypedDict):
     # ---- Error Handling ----
     error: Optional[str]
 
+    # ---- Persistence ----
+    latest_brief_id: Optional[str]
+
 
 class ConversationalOutput(TypedDict):
     """Output schema - these fields are streamed to UI via AG-UI protocol.
@@ -76,3 +80,4 @@ class ConversationalOutput(TypedDict):
 
     quick_replies: Optional[list[str]]
     suggest_brief: bool
+    latest_brief_id: Optional[str]

@@ -6,7 +6,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+_log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=getattr(logging, _log_level, logging.INFO))
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +27,22 @@ get_required_env("OPENAI_API_KEY")  # langchain_openai reads this automatically
 
 # Optional: Cohere API key for reranking (gracefully degrades if not set)
 COHERE_API_KEY = os.environ.get("COHERE_API_KEY")
+
+# Optional: Redis URL for distributed rate limiting
+REDIS_URL = os.environ.get("REDIS_URL")
+
+# Optional: LangGraph Postgres checkpointer connection
+LANGGRAPH_DB_URL = os.environ.get("LANGGRAPH_DB_URL")
+
+# Optional: Sentry DSN for error tracking
+SENTRY_DSN = os.environ.get("SENTRY_DSN")
+
+# Storage buckets
+DOCUMENTS_BUCKET = os.environ.get("DOCUMENTS_BUCKET", "documents")
+BRIEF_PDF_BUCKET = os.environ.get("BRIEF_PDF_BUCKET", "briefs")
+
+# Retention policy default (days)
+RETENTION_DAYS = int(os.environ.get("RETENTION_DAYS", "90"))
 
 # Supabase JWT secret for auth token verification
 SUPABASE_JWT_SECRET = os.environ.get("SUPABASE_JWT_SECRET")

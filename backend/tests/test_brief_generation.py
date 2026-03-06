@@ -79,6 +79,40 @@ class TestBriefTriggerDetection:
         )
         assert route_after_initialize(state) == "skip"
 
+    def test_route_keeps_active_brief_flow_with_pending_questions(self):
+        """If brief intake is active, follow-up answers should stay in brief flow."""
+        state = _create_test_state(
+            mode="chat",
+            current_query="No response yet",
+            brief_pending_questions=["Question X"],
+            brief_questions_asked=2,
+            brief_info_complete=False,
+        )
+        assert route_after_initialize(state) == "brief"
+
+    def test_route_keeps_active_brief_flow_after_last_question_until_complete(self):
+        """After asking questions, next user answer should still route to brief check/generate."""
+        state = _create_test_state(
+            mode="chat",
+            current_query="No response yet",
+            brief_pending_questions=[],
+            brief_questions_asked=3,
+            brief_info_complete=False,
+        )
+        assert route_after_initialize(state) == "brief"
+
+    def test_route_exits_brief_flow_once_complete(self):
+        """Once brief is complete, routing should return to normal chat logic."""
+        state = _create_test_state(
+            mode="chat",
+            is_first_message=False,
+            current_query="Tell me more",
+            brief_pending_questions=[],
+            brief_questions_asked=3,
+            brief_info_complete=True,
+        )
+        assert route_after_initialize(state) == "skip"
+
 
 class TestBriefInfoRouting:
     """Test routing logic for brief info completeness."""
@@ -403,6 +437,29 @@ class TestBriefCheckInfoNode:
 
         assert result["brief_info_complete"] is True
 
+    @pytest.mark.asyncio
+    async def test_completes_after_full_question_round_without_reasking(self):
+        """After finishing one full intake question round, proceed to generation."""
+        state = _create_test_state(
+            current_query="No response yet",
+            brief_pending_questions=[],
+            brief_current_question_index=3,
+            brief_total_questions=3,
+            brief_questions_asked=3,
+            brief_info_complete=False,
+            brief_missing_info=["Exact amount withheld"],
+            brief_facts_collected={
+                "legal_area": "tenancy",
+                "situation_summary": "Bond not returned",
+            },
+        )
+
+        with patch("app.agents.stages.brief_flow.ChatOpenAI") as mock_llm_class:
+            result = await brief_check_info_node(state, {})
+
+        mock_llm_class.assert_not_called()
+        assert result["brief_info_complete"] is True
+
 
 class TestBriefAskQuestionsNode:
     """Test the brief questions node."""
@@ -519,6 +576,9 @@ class TestBriefGenerateNode:
         assert "Lawyer Brief" in result["messages"][0].content
         assert result["mode"] == "chat"  # Returns to chat mode
         assert result["suggest_lawyer"] is True
+        assert result["brief_info_complete"] is True
+        assert result["brief_pending_questions"] == []
+        assert result["brief_questions_asked"] == 0
 
     @pytest.mark.asyncio
     async def test_includes_quick_replies_after_brief(self):
