@@ -10,6 +10,19 @@ export type Conversation = {
   updated_at?: string;
 };
 
+export type ConversationListResponse = {
+  items: Conversation[];
+  limit: number;
+  offset: number;
+};
+
+export type AccountUserView = {
+  fullName: string;
+  email: string;
+  userId: string;
+  createdAt?: string | null;
+};
+
 export type ConversationMessage = {
   id: string;
   role: "user" | "assistant" | "system" | "tool";

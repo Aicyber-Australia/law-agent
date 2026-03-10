@@ -5,7 +5,10 @@ export async function middleware(request: NextRequest) {
   const { user, response } = await updateSession(request);
 
   // Protected routes: require auth
-  if (request.nextUrl.pathname.startsWith("/chat")) {
+  if (
+    request.nextUrl.pathname.startsWith("/chat") ||
+    request.nextUrl.pathname.startsWith("/account")
+  ) {
     if (!user) {
       return NextResponse.redirect(new URL("/login", request.url));
     }

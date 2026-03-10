@@ -7,6 +7,7 @@ import { CopilotChat } from "@copilotkit/react-ui";
 import "@copilotkit/react-ui/styles.css";
 import {
   useCopilotReadable,
+  useCopilotChatInternal,
   useCopilotChat,
   useCoAgent,
 } from "@copilotkit/react-core";
@@ -21,7 +22,7 @@ import { useMode } from "../../contexts/ModeContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { BACKEND_URL } from "@/lib/backend";
-import type { Conversation } from "@/lib/api-types";
+import type { Conversation, ConversationMessage } from "@/lib/api-types";
 import {
   Sheet,
   SheetContent,
@@ -70,6 +71,13 @@ type UploadedDocument = {
   filename: string;
 };
 
+const MESSAGE_ROLE_MAP: Record<ConversationMessage["role"], MessageRole> = {
+  user: MessageRole.User,
+  assistant: MessageRole.Assistant,
+  system: MessageRole.System,
+  tool: MessageRole.Tool,
+};
+
 export default function ChatPageClient({ conversationId }: { conversationId: string }) {
   const router = useRouter();
   const [userState, setUserState] = useState<string | null>(null);
@@ -81,6 +89,7 @@ export default function ChatPageClient({ conversationId }: { conversationId: str
   const [latestBriefId, setLatestBriefId] = useState<string | null>(null);
   const [downloadingBrief, setDownloadingBrief] = useState(false);
   const [conversationStarted, setConversationStarted] = useState(false);
+  const { appendMessage, setMessages } = useCopilotChatInternal();
 
   const backendRequest = async (path: string, init?: RequestInit) => {
     const supabase = createClient();
@@ -111,16 +120,34 @@ export default function ChatPageClient({ conversationId }: { conversationId: str
   };
 
   const loadConversationContext = async () => {
+    // Prevent showing previous thread messages while we switch conversations.
+    setMessages([]);
+    setConversationStarted(false);
     try {
       const response = await backendRequest(
         `/api/v1/conversations/${conversationId}?message_limit=20`
       );
       if (!response.ok) return;
       const payload = await response.json();
+      const storedMessages: ConversationMessage[] = Array.isArray(payload.messages)
+        ? payload.messages
+        : [];
+
+      setMessages(
+        storedMessages.map(
+          (message) =>
+            new TextMessage({
+              id: message.id,
+              createdAt: message.created_at,
+              role: MESSAGE_ROLE_MAP[message.role],
+              content: message.content,
+            })
+        )
+      );
       setUserState(payload.user_state ?? null);
       setLegalTopic(payload.legal_topic ?? "general");
       setLatestBriefId(payload.latest_brief?.id || null);
-      setConversationStarted(Array.isArray(payload.messages) && payload.messages.length > 0);
+      setConversationStarted(storedMessages.length > 0);
       setUploadedDocument(null);
     } catch {
       // Non-fatal in UI.
@@ -235,7 +262,6 @@ export default function ChatPageClient({ conversationId }: { conversationId: str
   }, [agentState?.latest_brief_id]);
 
   // Auto-continue conversation when user selects a state after being prompted
-  const { appendMessage } = useCopilotChat();
   const prevUserState = useRef(userState);
   const userSentMessage = useRef(false);
 
@@ -642,6 +668,12 @@ export default function ChatPageClient({ conversationId }: { conversationId: str
                   Home
                 </Link>
               </DropdownMenuItem>
+              <DropdownMenuItem asChild className="cursor-pointer">
+                <Link href="/account">
+                  <Users className="mr-2 h-4 w-4" />
+                  Account
+                </Link>
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-red-600 focus:text-red-600">
                 <LogOut className="mr-2 h-4 w-4" />
@@ -709,6 +741,12 @@ export default function ChatPageClient({ conversationId }: { conversationId: str
                 <Link href="/">
                   <ArrowLeft className="mr-2 h-4 w-4" />
                   Home
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild className="cursor-pointer">
+                <Link href="/account">
+                  <Users className="mr-2 h-4 w-4" />
+                  Account
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuSeparator />
