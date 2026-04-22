@@ -4,15 +4,16 @@ import { updateSession } from "@/lib/supabase/middleware";
 export async function middleware(request: NextRequest) {
   const { user, response } = await updateSession(request);
 
-  // Protected routes: require auth
-  if (
-    request.nextUrl.pathname.startsWith("/chat") ||
-    request.nextUrl.pathname.startsWith("/account")
-  ) {
-    if (!user) {
-      return NextResponse.redirect(new URL("/login", request.url));
-    }
-  }
+  // Auth gate temporarily disabled: /chat and /account are reachable without a session.
+  // Previous behavior (restore if you want mandatory login for these routes):
+  // if (
+  //   request.nextUrl.pathname.startsWith("/chat") ||
+  //   request.nextUrl.pathname.startsWith("/account")
+  // ) {
+  //   if (!user) {
+  //     return NextResponse.redirect(new URL("/login", request.url));
+  //   }
+  // }
 
   // Auth pages: redirect to chat if already logged in
   if (

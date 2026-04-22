@@ -106,7 +106,10 @@ async def get_current_user(
 async def get_optional_user(request: Request) -> dict | None:
     """
     Extract user from Authorization header if present, otherwise return None.
-    Use for endpoints that work both authenticated and unauthenticated.
+    Use for endpoints that work both authenticated and unauthenticated (e.g. /copilotkit).
+
+    Missing or non-Bearer auth => None (guest). Malformed or expired JWT => None so the
+    request may still proceed as guest where the route allows it.
     """
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):

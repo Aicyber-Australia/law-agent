@@ -60,12 +60,10 @@ export default function LoginPage() {
         {/* Logo */}
         <Link
           href="/"
-          className="flex items-center justify-center gap-2 mb-8"
+          className="group aui-brand-home mb-8 justify-center gap-2"
         >
           <Image src="/logo.svg" alt="AusLaw AI" width={80} height={80} />
-          <span className="text-2xl font-semibold text-slate-900 tracking-tight">
-            AusLaw AI
-          </span>
+          <span className="aui-brand-home__label text-2xl">AusLaw AI</span>
         </Link>
 
         <Card className="border-slate-200 shadow-sm">

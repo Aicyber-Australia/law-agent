@@ -44,35 +44,42 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="relative min-h-screen overflow-x-hidden bg-slate-50 text-slate-900">
+      <div className="pointer-events-none fixed inset-0 -z-10" aria-hidden>
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgb(148_163_184/0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgb(148_163_184/0.08)_1px,transparent_1px)] bg-[size:24px_24px]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-slate-50/90 via-white to-slate-50" />
+      </div>
+
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
       {/* Navigation */}
-      <nav className="fixed top-4 left-4 right-4 z-50 bg-white/80 backdrop-blur-md border border-slate-200 rounded-2xl shadow-sm">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Image src="/logo.svg" alt="AusLaw AI" width={72} height={72} />
-            <span className="text-xl font-semibold text-slate-900 tracking-tight">
+      <nav className="fixed top-4 left-4 right-4 z-50 rounded-3xl border border-slate-200/90 bg-white/95 shadow-sm shadow-slate-900/[0.04] backdrop-blur-xl transition-all duration-300 ease-out hover:border-slate-300/90 hover:bg-white hover:shadow-md">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 sm:py-3.5 flex items-center justify-between gap-2 sm:gap-4">
+          <Link href="/" className="group aui-brand-home min-w-0 sm:gap-3">
+            <div className="aui-brand-home__mark">
+              <Image src="/logo.svg" alt="AusLaw AI" width={56} height={56} />
+            </div>
+            <span className="aui-brand-home__label text-lg sm:text-xl truncate">
               AusLaw AI
             </span>
-          </div>
+          </Link>
           <div className="flex items-center gap-4">
             <Link
               href="#features"
-              className="text-sm text-slate-600 hover:text-slate-900 transition-colors hidden sm:block"
+              className="text-sm text-slate-600 hover:text-slate-900 rounded-lg px-3 py-2 transition-all duration-200 ease-out hover:bg-slate-100/90 active:scale-[0.98] hidden sm:inline-flex"
             >
               Features
             </Link>
             <Link
               href="#how-it-works"
-              className="text-sm text-slate-600 hover:text-slate-900 transition-colors hidden sm:block"
+              className="text-sm text-slate-600 hover:text-slate-900 rounded-lg px-3 py-2 transition-all duration-200 ease-out hover:bg-slate-100/90 active:scale-[0.98] hidden sm:inline-flex"
             >
               How it works
             </Link>
-            <Link href="/login">
+            <Link href="/chat">
               <Button className="bg-sky-700 hover:bg-sky-800 text-white cursor-pointer">
                 Start Free
                 <ArrowRight className="ml-2 h-4 w-4" />
@@ -83,9 +90,9 @@ export default function LandingPage() {
       </nav>
 
       {/* Hero Section */}
-      <section className="pt-32 pb-20 px-6">
+      <section className="relative pt-32 pb-20 px-6">
         <div className="max-w-6xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 bg-sky-50 border border-sky-200 rounded-full px-4 py-1.5 mb-6">
+          <div className="inline-flex items-center gap-2 bg-sky-50 border border-sky-200 rounded-full px-4 py-1.5 mb-6 shadow-sm shadow-sky-900/5 transition-all duration-300 ease-out hover:border-sky-300/90 hover:shadow-md">
             <MapPin className="h-4 w-4 text-sky-700" />
             <span className="text-sm text-sky-800 font-medium">
               Australian Legal Information
@@ -105,7 +112,7 @@ export default function LandingPage() {
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link href="/login">
+            <Link href="/chat">
               <Button
                 size="lg"
                 className="bg-sky-700 hover:bg-sky-800 text-white text-lg px-8 py-6 cursor-pointer"
@@ -144,8 +151,14 @@ export default function LandingPage() {
       </section>
 
       {/* Features Section */}
-      <section id="features" className="py-20 px-6 bg-white">
-        <div className="max-w-6xl mx-auto">
+      <section
+        id="features"
+        className="relative border-t border-slate-200/80 bg-white/80 py-20 px-6 backdrop-blur-[2px] md:py-24"
+      >
+        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,rgb(148_163_184/0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgb(148_163_184/0.06)_1px,transparent_1px)] bg-[size:24px_24px] opacity-50 [mask-image:linear-gradient(to_bottom,black,transparent)]" />
+        </div>
+        <div className="max-w-6xl mx-auto relative z-10">
           <div className="text-center mb-14">
             <h2 className="text-3xl sm:text-4xl font-semibold text-slate-900 tracking-tight mb-4">
               Everything You Need to Navigate Australian Law
@@ -182,8 +195,15 @@ export default function LandingPage() {
       </section>
 
       {/* How It Works Section */}
-      <section id="how-it-works" className="py-20 px-6 bg-slate-50">
-        <div className="max-w-6xl mx-auto">
+      <section
+        id="how-it-works"
+        className="relative border-y border-slate-200/80 bg-slate-50/90 py-20 px-6 backdrop-blur-[2px] md:py-24"
+      >
+        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,rgb(148_163_184/0.07)_1px,transparent_1px),linear-gradient(to_bottom,rgb(148_163_184/0.07)_1px,transparent_1px)] bg-[size:24px_24px] opacity-60" />
+          <div className="absolute top-1/2 left-1/2 h-[min(90vw,36rem)] w-[min(90vw,36rem)] -translate-x-1/2 -translate-y-1/2 rounded-full bg-sky-200/15 blur-3xl" />
+        </div>
+        <div className="max-w-6xl mx-auto relative z-10">
           <div className="text-center mb-14">
             <h2 className="text-3xl sm:text-4xl font-semibold text-slate-900 tracking-tight mb-4">
               How It Works
@@ -214,34 +234,54 @@ export default function LandingPage() {
       </section>
 
       {/* CTA Section */}
-      <section className="py-20 px-6 bg-slate-900">
-        <div className="max-w-4xl mx-auto text-center">
-          <h2 className="text-3xl sm:text-4xl font-semibold text-white tracking-tight mb-4">
-            Ready to Understand Your Legal Rights?
-          </h2>
-          <p className="text-lg text-slate-400 mb-8 max-w-2xl mx-auto">
-            Join thousands of Australians who use AusLaw AI to navigate legal
-            questions with confidence.
-          </p>
-          <Link href="/login">
-            <Button
-              size="lg"
-              className="bg-sky-600 hover:bg-sky-700 text-white text-lg px-8 py-6 cursor-pointer"
-            >
-              Start Your Free Consultation
-              <ArrowRight className="ml-2 h-5 w-5" />
-            </Button>
-          </Link>
+      <section className="relative overflow-hidden bg-slate-950 py-20 px-6 md:py-24">
+        <div
+          className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgb(148_163_184/0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgb(148_163_184/0.06)_1px,transparent_1px)] bg-[size:24px_24px] opacity-25 [mask-image:radial-gradient(ellipse_80%_80%_at_50%_50%,#000_35%,transparent_100%)]"
+          aria-hidden
+        />
+        <div className="pointer-events-none absolute top-0 left-1/4 h-64 w-64 rounded-full bg-sky-500/10 blur-3xl" aria-hidden />
+        <div className="pointer-events-none absolute bottom-0 right-1/4 h-80 w-80 rounded-full bg-blue-500/10 blur-3xl" aria-hidden />
+
+        <div className="relative z-10 mx-auto max-w-4xl text-center">
+          <div className="rounded-3xl border border-white/10 bg-white/[0.04] px-6 py-10 shadow-2xl shadow-black/30 backdrop-blur-sm sm:px-10 sm:py-12">
+            <h2 className="text-3xl sm:text-4xl font-semibold text-white tracking-tight mb-4">
+              Ready to Understand Your Legal Rights?
+            </h2>
+            <p className="text-lg text-slate-400 mb-8 max-w-2xl mx-auto">
+              Join thousands of Australians who use AusLaw AI to navigate legal
+              questions with confidence.
+            </p>
+            <Link href="/chat">
+              <Button
+                size="lg"
+                className="rounded-full bg-sky-600 px-8 py-6 text-lg text-white shadow-lg shadow-sky-600/25 transition-[background-color,box-shadow,transform] duration-200 hover:bg-sky-500 hover:shadow-xl hover:shadow-sky-500/20 active:scale-[0.98] motion-reduce:active:scale-100 sm:px-10"
+              >
+                Start Your Free Consultation
+                <ArrowRight className="ml-2 h-5 w-5" strokeWidth={2.25} />
+              </Button>
+            </Link>
+          </div>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="py-10 px-6 bg-slate-950">
-        <div className="max-w-6xl mx-auto">
+      <footer className="relative border-t border-slate-800/80 bg-slate-950 py-10 px-6">
+        <div
+          className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgb(148_163_184/0.05)_1px,transparent_1px),linear-gradient(to_bottom,rgb(148_163_184/0.05)_1px,transparent_1px)] bg-[size:24px_24px] opacity-20"
+          aria-hidden
+        />
+        <div className="max-w-6xl mx-auto relative z-10">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <Image src="/logo.svg" alt="AusLaw AI" width={56} height={56} className="opacity-50" />
-              <span className="text-slate-500 font-medium">AusLaw AI</span>
+            <div className="inline-flex items-center gap-2" aria-label="AusLaw AI">
+              <Image
+                src="/logo.svg"
+                alt=""
+                width={56}
+                height={56}
+                className="opacity-55"
+                aria-hidden
+              />
+              <span className="text-sm font-medium text-slate-500">AusLaw AI</span>
             </div>
             <p className="text-sm text-slate-500 text-center">
               This tool provides general legal information, not legal advice.
@@ -264,17 +304,18 @@ function FeatureCard({
   description: string;
 }) {
   return (
-    <Card className="border-slate-200 shadow-sm hover:shadow-md transition-shadow duration-200 cursor-pointer">
-      <CardHeader>
-        <div className="w-12 h-12 bg-sky-50 rounded-xl flex items-center justify-center text-sky-700 mb-3">
+    <Card className="group relative h-full cursor-pointer overflow-hidden rounded-2xl border border-slate-200/90 bg-white/80 shadow-sm backdrop-blur-sm transition-[border-color,box-shadow,transform] duration-300 ease-out hover:-translate-y-1 hover:border-sky-300/50 hover:shadow-[0_12px_40px_-12px_rgba(14_165_233/0.12)] motion-reduce:hover:translate-y-0">
+      <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100 bg-gradient-to-br from-sky-50/60 via-white/0 to-transparent" />
+      <CardHeader className="relative z-10">
+        <div className="w-12 h-12 rounded-xl border border-sky-200/80 bg-gradient-to-br from-slate-50 to-white flex items-center justify-center text-sky-700 mb-3 shadow-inner transition-[transform,border-color] duration-300 ease-out group-hover:scale-105 group-hover:border-sky-300/90">
           {icon}
         </div>
         <CardTitle className="text-xl font-semibold text-slate-900">
           {title}
         </CardTitle>
       </CardHeader>
-      <CardContent>
-        <CardDescription className="text-base text-slate-600 leading-relaxed">
+      <CardContent className="relative z-10">
+        <CardDescription className="text-base text-slate-600 leading-relaxed transition-colors group-hover:text-slate-700">
           {description}
         </CardDescription>
       </CardContent>
@@ -292,12 +333,17 @@ function StepCard({
   description: string;
 }) {
   return (
-    <div className="text-center">
-      <div className="w-14 h-14 bg-sky-700 text-white rounded-full flex items-center justify-center text-2xl font-semibold mx-auto mb-5">
-        {number}
+    <div className="group relative h-full overflow-hidden rounded-2xl border border-slate-200/90 bg-white/80 p-6 shadow-sm backdrop-blur-sm transition-[border-color,box-shadow,transform] duration-300 ease-out hover:-translate-y-0.5 hover:border-sky-300/40 hover:shadow-md motion-reduce:hover:translate-y-0">
+      <div className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-500 group-hover:opacity-100 bg-gradient-to-br from-sky-50/50 to-transparent" />
+      <div className="relative z-10 text-center">
+        <div className="w-14 h-14 bg-sky-700 text-white rounded-full flex items-center justify-center text-2xl font-semibold mx-auto mb-5 shadow-md shadow-sky-900/25 transition-transform duration-300 ease-out group-hover:scale-105 motion-reduce:group-hover:scale-100">
+          {number}
+        </div>
+        <h3 className="text-xl font-semibold text-slate-900 mb-3">{title}</h3>
+        <p className="text-slate-600 leading-relaxed transition-colors group-hover:text-slate-700">
+          {description}
+        </p>
       </div>
-      <h3 className="text-xl font-semibold text-slate-900 mb-3">{title}</h3>
-      <p className="text-slate-600 leading-relaxed">{description}</p>
     </div>
   );
 }

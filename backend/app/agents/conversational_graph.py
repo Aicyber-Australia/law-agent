@@ -47,7 +47,7 @@ from app.agents.stages.brief_flow import (
     brief_generate_node,
 )
 from app.config import logger, LANGGRAPH_DB_URL
-from app.db.production_store import create_conversation, add_message, get_conversation_owner
+from app.db.production_store import create_conversation, add_message
 
 try:
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver  # type: ignore
@@ -103,8 +103,9 @@ async def initialize_node(state: ConversationalState, config: RunnableConfig | N
     user_id = extract_user_id(state)
     thread_id = extract_thread_id(state) or _thread_id_from_config(config)
     session_id = thread_id or state.get("session_id") or str(uuid.uuid4())
-    if not user_id and session_id:
-        user_id = get_conversation_owner(session_id)
+    # Do not infer user_id from conversation id alone: anonymous clients could guess a UUID
+    # and writes would attach to the wrong account. Persistence only when CopilotKit exposes
+    # a real authenticated user id from the client.
 
     user_state = extract_user_state(state)
     uploaded_document_url = extract_document_url(state)
