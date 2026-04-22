@@ -27,7 +27,7 @@ export default async function AccountPage() {
   } = await supabase.auth.getSession();
 
   if (!session?.access_token) {
-    redirect("/login");
+    redirect("/chat?auth=required");
   }
 
   const {
@@ -35,7 +35,7 @@ export default async function AccountPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login");
+    redirect("/chat?auth=required");
   }
 
   let initialConversations: Conversation[] = [];

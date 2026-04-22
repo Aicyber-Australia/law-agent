@@ -1,318 +1,34 @@
-# CLAUDE.md
+# Repo notes (internal)
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Stack
 
-## Project Overview
+- Frontend: `frontend/` — Next 14, CopilotKit, Tailwind, Supabase client. Chat UI: `app/chat/[conversationId]/ChatPageClient.tsx`. Copilot proxy: `app/api/copilotkit/route.ts`.
+- Backend: `backend/` — FastAPI entry `main.py`, LangGraph in `app/agents/`, tools in `app/tools/`.
+- Schema: `supabase/migrations/*.sql` only.
 
-AusLaw AI - An Australian Legal Assistant MVP that provides legal information, lawyer matching, step-by-step checklists, and document analysis for legal procedures across Australian states/territories.
-
-## Architecture
-
-```
-Frontend (Next.js)  →  /api/copilotkit  →  FastAPI Backend  →  Supabase
-     ↓                      ↓                    ↓
-CopilotChat         HttpAgent proxy      Custom LangGraph
-+ StateSelector     (AG-UI protocol)     (CopilotKitState)
-+ TopicSelector                                ↓
-+ FileUpload                  Tools: lookup_law, find_lawyer,
-+ useCopilotReadable          analyze_document, search_case_law,
-                              get_action_template
-```
-
-**Frontend**: Next.js 14 + CopilotKit + shadcn/ui + Tailwind CSS
-**Backend**: FastAPI + LangGraph + langchain-openai (GPT-4o)
-**Database**: Supabase PostgreSQL with pgvector for RAG
-**Storage**: Supabase Storage for document uploads
-
-## Development Commands
-
-### Backend (requires conda environment `law_agent`)
-
-**Conda location**: `/Users/kevin/dev/tools/miniconda3`
-
-To run any backend command in a shell (since conda activate doesn't work directly in non-interactive shells):
-```bash
-source /Users/kevin/dev/tools/miniconda3/etc/profile.d/conda.sh && conda activate law_agent && <command>
-```
+## Commands
 
 ```bash
-cd backend
-conda activate law_agent
-python main.py                    # Start server on localhost:8000
+cd backend && pip install -r requirements.txt && python main.py
+cd frontend && npm install && npm run dev
 ```
 
-### Frontend
-```bash
-cd frontend
-npm run dev                       # Start dev server on localhost:3000
-npm run build
-npm run lint
-```
+Backend tests: `cd backend && pytest` (see `backend/tests/`).
 
-### Testing
-```bash
-cd backend
-conda activate law_agent
-pytest                                              # Run all tests
-pytest tests/test_conversational_mode.py -v         # Conversational mode tests
-pytest tests/test_brief_generation.py -v            # Brief generation tests
-pytest tests/test_lookup_law.py -v                  # RAG/lookup tests
-pytest tests/test_file.py::test_name -v             # Run single test
-```
+## Auth behaviour (high level)
 
-### Data Ingestion (RAG)
-```bash
-cd backend
-python scripts/ingest_corpus.py --limit 10              # Test with 10 docs
-python scripts/ingest_corpus.py --batch-size 500        # Full ingestion (~6000 docs)
-python scripts/eval_rag.py --verbose                    # RAG evaluation
-```
+- `/chat` is usable without login (guest CopilotKit). `/account` and REST APIs that call `backendRequest` in the client still expect a session where enforced server-side.
+- Backend `CopilotKitMiddleware`: JWT when present; optional user for guests (rate limit, no DB writes for guest paths — unchanged server rules).
 
-### Database
-Run SQL files in Supabase SQL Editor:
-- `database/setup.sql` - Initial schema and mock data
-- `database/migration_v2.sql` - Adds action_templates table and state column
-- `database/migration_rag.sql` - pgvector schema for RAG
-- `database/migration_parking_ticket.sql` - Parking ticket action templates (VIC, NSW)
-- `database/migration_insurance_claim.sql` - Insurance claim action templates (VIC, NSW)
+## Env
 
-## Environment Variables
+Mirror `backend/.env.example` and `frontend/.env.local` (see root `README.md`).
 
-Backend `.env` file in `/backend`:
-```
-SUPABASE_URL=
-SUPABASE_KEY=
-SUPABASE_JWT_SECRET=         # Required: for /copilotkit endpoint auth
-OPENAI_API_KEY=
-COHERE_API_KEY=              # Optional: for reranking
-ALLOWED_DOCUMENT_HOSTS=      # Required: your Supabase domain
-AUSTLII_PROXY_URL=           # Optional: Vercel proxy URL for deployed environments
-AUSTLII_PROXY_SECRET=        # Optional: shared secret for proxy auth
-```
+## Styling
 
-Frontend `.env.local` file in `/frontend`:
-```
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-BACKEND_URL=http://localhost:8000
-AUSTLII_PROXY_SECRET=        # Optional: must match backend if proxy is used
-```
+- Chat shell / Copilot overrides: `frontend/app/globals.css`.
+- Mode theming: `document.documentElement` `data-mode` from `frontend/app/contexts/ModeContext.tsx`.
 
-## Key Architecture Decisions
+## Code style
 
-### RAG System + AustLII Fallback
-The `lookup_law` tool uses hybrid retrieval: vector similarity (pgvector) + full-text search + RRF fusion + optional Cohere reranking. All states are supported:
-
-- **States with RAG data** (NSW, QLD, FEDERAL, ACT): RAG first, AustLII fallback if RAG returns no/low-confidence results
-- **States without RAG data** (VIC, SA, WA, TAS, NT): AustLII searched directly (no wasted RAG call)
-- **Data Source**: Hugging Face `isaacus/open-australian-legal-corpus` (Primary Legislation)
-- **Chunking**: Parent chunks (2000 tokens) + Child chunks (500 tokens) for docs >= 10K chars
-
-### AustLII Integration
-AustLII is a free public legal database operated by UNSW and UTS Law faculties. No API key required.
-
-- **Service**: `app/services/austlii_search.py` - shared by `lookup_law` fallback and `search_case_law` tool
-- **Legislation search**: Searches consolidated acts per state via `au/legis/{state}/consol_act`
-- **Case law search**: Searches court decisions via `au/cases/{state}`
-- **Endpoint**: `https://www.austlii.edu.au/cgi-bin/sinosrch.cgi` (GET with query params)
-- **SSRF protection**: URL validation before and after redirects, restricted to `austlii.edu.au` hosts
-- **Proxy**: AustLII blocks DigitalOcean IPs. In production, requests route through a Vercel API proxy (`/api/austlii-proxy`). Controlled by `AUSTLII_PROXY_URL` env var. When not set, direct access is used (works locally).
-
-### CopilotKit Context Passing
-Frontend uses `useCopilotReadable` to share user's selected state, uploaded document URL, UI mode, and legal topic. Backend reads from `state["copilotkit"]["context"]`.
-
-**Bug Workaround**: AG-UI protocol double-serializes strings (e.g., `"\"NSW\""`). Use utilities from `app/agents/utils/context.py`:
-- `extract_user_state(state)` - Get Australian state code
-- `extract_document_url(state)` - Get uploaded document URL
-- `extract_ui_mode(state)` - Get UI mode ("chat" or "analysis")
-- `extract_legal_topic(state)` - Get legal topic ("general", "parking_ticket", etc.)
-- `clean_context_value(value)` - Strip extra quotes from raw values
-
-### Suppressing Internal LLM Streaming
-
-Use config helpers from `app/agents/utils/config.py` to control streaming:
-
-| Helper | emit-messages | emit-tool-calls | Use for |
-|--------|---------------|-----------------|---------|
-| `get_internal_llm_config` | False | False | Internal LLM calls (safety, quick replies) |
-| `get_chat_agent_config` | True | False | ReAct agents with tools |
-| (default config) | True | True | Simple LLM calls without tools |
-
-**Known limitation**: With `emit_messages=True`, intermediate ReAct agent messages like "Let me search for that..." will appear then disappear when the final response arrives. This is a tradeoff for keeping response streaming. CopilotKit currently doesn't support selective message filtering (see [GitHub Issue #1959](https://github.com/CopilotKit/CopilotKit/issues/1959)).
-
-### Message Deduplication
-
-Messages returned from LangGraph nodes must have explicit unique IDs to prevent duplicates on checkpoint restore. Without IDs, the frontend cannot deduplicate messages that are re-sent when state is restored.
-
-```python
-# Good - explicit ID preserved across checkpoint restore
-AIMessage(content="...", id=f"analysis_offer_{uuid.uuid4().hex[:8]}")
-
-# Bad - ID may change on deserialization, causing duplicates
-AIMessage(content="...")
-```
-
-### Authentication & Rate Limiting
-- `app/auth.py` verifies Supabase JWTs using JWKS (ECC/RSA) with HS256 fallback
-- `CopilotKitMiddleware` in `main.py` enforces auth + rate limiting (30 req/min in-memory) on `/copilotkit` endpoint
-- Frontend `middleware.ts` protects `/chat` route (redirects unauthenticated users to `/login`)
-- Frontend auth pages: `/login` (email/password + Google OAuth), `/signup`, `/auth/callback`
-
-### Document Upload Flow
-1. Frontend uploads to Supabase Storage bucket `documents`
-2. Public URL shared with agent via `useCopilotReadable`
-3. Agent calls `analyze_document(document_url=...)`
-
-## Frontend Structure
-
-```
-frontend/app/
-├── page.tsx                       # Landing page
-├── login/page.tsx                 # Email/password + Google OAuth login
-├── signup/page.tsx                # User registration
-├── auth/callback/route.ts         # OAuth callback handler
-├── api/
-│   ├── copilotkit/route.ts        # CopilotKit AG-UI proxy to backend
-│   └── austlii-proxy/route.ts     # AustLII proxy for deployed environments
-├── chat/page.tsx                  # Main chat page with sidebar + CopilotChat
-├── components/
-│   ├── StateSelector.tsx       # Australian state/territory dropdown
-│   ├── TopicSelector.tsx       # Legal topic selector (General, Parking Ticket, etc.)
-│   ├── FileUpload.tsx          # Document upload to Supabase Storage
-│   ├── ModeToggle.tsx          # Chat/Analysis mode toggle
-│   └── AnalysisOutput.tsx      # Deep analysis results display
-├── contexts/
-│   └── ModeContext.tsx         # App-wide mode state (chat | analysis)
-├── globals.css                 # CopilotKit overrides, mode-based theming
-└── layout.tsx                  # CopilotKit provider setup
-```
-
-### Key Frontend Patterns
-- **Mode-based theming**: CSS uses `[data-mode="chat"]` and `[data-mode="analysis"]` selectors for distinct visual styles
-- **Quick replies**: Agent state provides `quick_replies` array via `useCoAgent`, limited to 3 items in UI
-- **Topic pills**: Starter topic buttons shown before conversation begins, hidden after first message. Pills change based on selected legal topic
-- **CopilotKit styling**: Override classes like `.copilotKitMessages`, `.copilotKitInput` in globals.css
-
-## Backend Structure
-
-```
-backend/
-├── main.py                 # FastAPI app entry point
-├── app/
-│   ├── config.py           # Environment variables, logging
-│   ├── db/supabase_client.py
-│   ├── agents/
-│   │   ├── conversational_state.py   # State + output schema for chat mode
-│   │   ├── conversational_graph.py   # Main graph: chat + brief
-│   │   ├── stages/
-│   │   │   ├── safety_check_lite.py  # Fast keyword-first safety check
-│   │   │   ├── chat_response.py      # ReAct agent with tools + quick replies
-│   │   │   └── brief_flow.py         # Brief generation nodes
-│   │   ├── schemas/                  # Emergency resources
-│   │   └── utils/                    # Config helpers, context extraction
-│   ├── services/                     # RAG, AustLII search (with proxy support), reranking
-│   ├── tools/                        # lookup_law, find_lawyer, search_case_law, analyze_document, get_action_template
-│   └── utils/                        # Document parsing, URL fetching
-├── tests/
-└── scripts/                          # Data ingestion, RAG evaluation
-```
-
-## Database Schema
-
-### RAG Tables
-- **legislation_documents**: `id`, `version_id`, `citation`, `jurisdiction`, `source_url`, `full_text`
-- **legislation_chunks**: `id`, `document_id`, `parent_chunk_id`, `content`, `embedding` (vector 1536), `chunk_type`
-
-### Key SQL Function
-`hybrid_search(query_embedding, query_text, filter_jurisdiction, match_count)` - Combined vector + keyword search.
-
----
-
-## Conversational Mode
-
-Fast, natural conversation with tools.
-
-```
-CHAT FLOW:
-initialize → safety_check_lite → chat_response → END
-                    │
-                    ↓ (if crisis)
-            escalation_response → END
-
-BRIEF FLOW (user-triggered via "Generate Brief" button):
-initialize → brief_check_info ─┬→ brief_generate → END
-                    ↑          │
-                    └──────────┴→ brief_ask_questions (loop)
-```
-
-### Key Features
-- **Safety Check**: Keyword detection first, LLM fallback only when uncertain
-- **Chat Response**: ReAct agent with tools: `lookup_law`, `find_lawyer`, `analyze_document`, `search_case_law`, `get_action_template`
-- **Quick Replies**: 2-4 suggested follow-up options after each response
-- **Tool Usage**: Use `lookup_law` for legislation (RAG + AustLII fallback), `search_case_law` for court decisions (AustLII), `get_action_template` for step-by-step checklists
-- **AustLII Sources**: When results come from AustLII (source `"austlii"` or `"austlii_case"`), the LLM cites the source URL and notes the user should verify
-
-### Analysis Mode
-Analysis mode uses the same ReAct agent and tools as chat mode, but with a different system prompt that guides a lawyer consultation flow (understand situation → explain law → suggest options). No separate graph nodes - purely prompt-driven.
-
-### Legal Topics (Domain Playbooks)
-Legal topic is a second axis orthogonal to mode. Mode controls *depth* (chat vs analysis), topic controls *domain*.
-
-```
-Sidebar:
-  Mode         [ Chat | Analysis ]              ← how deep
-  Legal Topic  [ General | Parking Ticket ]     ← what domain
-```
-
-**How it works:**
-- Frontend sends `legal_topic` via `useCopilotReadable` → backend extracts via `extract_legal_topic()`
-- `chat_response.py` composes the final system prompt: base prompt (mode) + topic playbook (appended)
-- When `legal_topic == "general"`, no playbook is appended (behaves as before)
-- When `legal_topic == "parking_ticket"`, `PARKING_TICKET_PLAYBOOK` is appended to the base prompt
-
-**Current topics:**
-- `general` — default, no playbook
-- `parking_ticket` — parking fines, speeding tickets, camera fines, infringement notices
-- `insurance_claim` — denied/underpaid claims, AFCA escalation, motor vehicle disputes
-
-**Adding a new topic:**
-1. Add the topic value to `TopicSelector.tsx` TOPICS array
-2. Add a `useCopilotReadable` condition in `chat/page.tsx` for the new topic
-3. Add detection keyword in `extract_legal_topic()` in `context.py`
-4. Add a `NEW_TOPIC_PLAYBOOK` constant in `chat_response.py` and register it in the `topic_playbooks` dict
-5. Add action template data via SQL migration into `action_templates` table
-
-**`get_action_template` tool**: Queries the `action_templates` table by state + keyword matching. Returns step-by-step checklists for common legal procedures. Used by the agent when a topic playbook is active.
-
-### Brief Generation Mode
-User clicks "Generate Brief" button to create a lawyer brief:
-
-1. **Info Check**: Extracts facts from conversation, identifies gaps
-2. **Ask Questions**: Questions asked **one at a time** with progress indicator ("Question 1/3")
-   - Handles "I don't know" → moves item to unknown list, asks next question
-   - Handles "Generate brief now" → generates with available info
-3. **Generate Brief**: Creates comprehensive brief with Summary, Facts, Parties, Goals, Questions for Lawyer
-   - Includes "Information Not Provided" section for skipped items
-
-**State fields** (in `conversational_state.py`):
-- `brief_pending_questions` - Remaining questions to ask
-- `brief_current_question_index` - For progress display
-- `brief_total_questions` - Total questions in current round
-
-**Triggers**:
-- `[GENERATE_BRIEF]` - Start brief mode (sent by frontend button)
-- `[GENERATE_NOW]` - Early generation request
-
----
-
-## Deployment
-
-- GitHub Actions workflow: `.github/workflows/deploy-backend.yml`
-- Triggers on push to `main` when `backend/**` changes
-- Deploys via SSH to DigitalOcean Droplet (Docker build + restart)
-- AustLII blocks DigitalOcean IPs, so production uses the Vercel API proxy (`AUSTLII_PROXY_URL`)
-
-## Code Style
-
-- All comments and documentation must be in English
-- After completing a plan, add a commit message that can be copied and pasted into the git commit command inside the summary.
+Comments and user-facing copy in English unless product requires otherwise.

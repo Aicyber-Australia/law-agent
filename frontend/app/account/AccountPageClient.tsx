@@ -12,7 +12,6 @@ import {
   ExternalLink,
   Fingerprint,
   Loader2,
-  LogOut,
   Mail,
   Trash2,
   User,
@@ -70,7 +69,6 @@ export default function AccountPageClient({
   const [loadingMore, setLoadingMore] = useState(false);
   const [actionState, setActionState] = useState<ActionState>(null);
   const [error, setError] = useState<string | null>(initialError);
-  const [signingOut, setSigningOut] = useState(false);
 
   const filteredConversations = useMemo(() => {
     if (filter === "all") return conversations;
@@ -182,7 +180,6 @@ export default function AccountPageClient({
   };
 
   const handleSignOut = async () => {
-    setSigningOut(true);
     const supabase = createClient();
     await supabase.auth.signOut();
     router.push("/login");
@@ -211,11 +208,9 @@ export default function AccountPageClient({
     <div className="min-h-screen bg-slate-50">
       <header className="border-b border-slate-200/80 bg-white/90 backdrop-blur-sm">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-4 sm:px-6">
-          <Link href="/" className="flex items-center gap-2.5">
+          <Link href="/" className="group aui-brand-home gap-2.5">
             <Image src="/logo.svg" alt="AusLaw AI" width={72} height={72} />
-            <span className="text-xl font-semibold text-slate-900 tracking-tight">
-              AusLaw AI
-            </span>
+            <span className="aui-brand-home__label text-xl">AusLaw AI</span>
           </Link>
           <div className="flex items-center gap-2">
             <Button asChild variant="outline" className="cursor-pointer">
@@ -224,17 +219,7 @@ export default function AccountPageClient({
                 Back to Chat
               </Link>
             </Button>
-            <Button
-              onClick={handleSignOut}
-              variant="ghost"
-              className="cursor-pointer text-red-600 hover:text-red-700"
-              disabled={signingOut}
-            >
-              {signingOut ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <LogOut className="mr-2 h-4 w-4" />
-              )}
+            <Button onClick={handleSignOut}>
               Log out
             </Button>
           </div>

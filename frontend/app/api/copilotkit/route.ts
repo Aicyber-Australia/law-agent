@@ -18,7 +18,8 @@ export const POST = async (req: NextRequest) => {
     data: { session },
   } = await supabase.auth.getSession();
 
-  // Create runtime with auth headers forwarded to backend
+  // Forward Supabase JWT when present so the backend can attribute / rate-limit logged-in
+  // users. Guests omit Authorization; the Python /copilotkit route allows that for anonymous chat.
   const copilotRuntime = new CopilotRuntime({
     agents: {
       auslaw_agent: new HttpAgent({

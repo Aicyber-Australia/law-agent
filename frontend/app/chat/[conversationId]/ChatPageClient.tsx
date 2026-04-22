@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CopilotChat } from "@copilotkit/react-ui";
 import "@copilotkit/react-ui/styles.css";
 import {
@@ -18,6 +19,7 @@ import { StateSelector } from "../../components/StateSelector";
 import { FileUpload } from "../../components/FileUpload";
 import { ModeToggle } from "../../components/ModeToggle";
 import { TopicSelector, type LegalTopic } from "../../components/TopicSelector";
+import { ToggleFeedbackAssistantMessage } from "@/components/ToggleFeedbackAssistantMessage";
 import { useMode } from "../../contexts/ModeContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -80,6 +82,8 @@ const MESSAGE_ROLE_MAP: Record<ConversationMessage["role"], MessageRole> = {
 
 export default function ChatPageClient({ conversationId }: { conversationId: string }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const showAccountAuthHint = searchParams.get("auth") === "required";
   const [userState, setUserState] = useState<string | null>(null);
   const [uploadedDocument, setUploadedDocument] = useState<UploadedDocument | null>(null);
   const [legalTopic, setLegalTopic] = useState<LegalTopic>("general");
@@ -252,6 +256,68 @@ export default function ChatPageClient({ conversationId }: { conversationId: str
 
   // Quick replies from agent state
   const quickReplies = agentState?.quick_replies;
+
+  /** Mount slot directly above CopilotKit input (avoids fragile absolute bottom offsets). */
+  const [quickReplyHost, setQuickReplyHost] = useState<HTMLDivElement | null>(null);
+  const quickRepliesKey = quickReplies?.join("\0") ?? "";
+
+  useLayoutEffect(() => {
+    let cancelled = false;
+    let created: HTMLDivElement | null = null;
+
+    const removeSlot = () => {
+      document.querySelector(".chat-page-container .quick-replies-slot")?.remove();
+      created = null;
+      setQuickReplyHost(null);
+    };
+
+    if (!quickReplies?.length) {
+      removeSlot();
+      return;
+    }
+
+    const attach = (): boolean => {
+      const chatRoot = document.querySelector(".chat-page-container .copilotKitChat");
+      const inputContainer = chatRoot?.querySelector(".copilotKitInputContainer");
+      const parent = inputContainer?.parentNode;
+      if (!inputContainer || !parent || cancelled) return false;
+
+      parent.querySelector(":scope > .quick-replies-slot")?.remove();
+      const el = document.createElement("div");
+      el.className = "quick-replies-slot";
+      parent.insertBefore(el, inputContainer);
+      created = el;
+      setQuickReplyHost(el);
+      return true;
+    };
+
+    if (!attach()) {
+      const id = requestAnimationFrame(() => {
+        if (!cancelled) attach();
+      });
+      return () => {
+        cancelled = true;
+        cancelAnimationFrame(id);
+        if (created) {
+          created.remove();
+          created = null;
+        } else {
+          removeSlot();
+        }
+        setQuickReplyHost(null);
+      };
+    }
+
+    return () => {
+      cancelled = true;
+      if (created) {
+        created.remove();
+      } else {
+        removeSlot();
+      }
+      setQuickReplyHost(null);
+    };
+  }, [conversationId, quickRepliesKey, quickReplies?.length]);
 
   useEffect(() => {
     if (agentState?.latest_brief_id) {
@@ -612,10 +678,77 @@ export default function ChatPageClient({ conversationId }: { conversationId: str
     </div>
   );
 
+  const authActions = user ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-9 w-9 cursor-pointer rounded-full border border-transparent shadow-sm transition-[transform,box-shadow,background-color,border-color] duration-200 ease-out hover:border-slate-200/80 hover:bg-slate-100/90 hover:shadow active:scale-[0.98] motion-reduce:active:scale-100"
+        >
+          <Avatar className="h-8 w-8">
+            <AvatarFallback className="bg-primary/10 text-primary text-xs font-medium">
+              {getUserInitials()}
+            </AvatarFallback>
+          </Avatar>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        <DropdownMenuLabel className="font-normal">
+          <p className="text-sm font-medium">{user?.user_metadata?.full_name || "Account"}</p>
+          <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem asChild className="cursor-pointer">
+          <Link href="/">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            Home
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild className="cursor-pointer">
+          <Link href="/account">
+            <Users className="mr-2 h-4 w-4" />
+            Account
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-red-600 focus:text-red-600">
+          <LogOut className="mr-2 h-4 w-4" />
+          Log out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : (
+    <div className="flex shrink-0 flex-col items-end gap-1.5">
+      {showAccountAuthHint && (
+        <p className="max-w-[220px] text-right text-[11px] leading-snug text-slate-600 sm:text-xs">
+          Sign in to access your account.
+        </p>
+      )}
+      <div className="flex items-center gap-2">
+        <Button
+          asChild
+          variant="outline"
+          size="sm"
+          className="h-9 cursor-pointer rounded-full border-slate-200 px-4 text-xs font-semibold shadow-sm transition-[transform,box-shadow,background-color,border-color] duration-200 ease-out hover:border-slate-300 hover:bg-slate-50 hover:shadow active:scale-[0.98] motion-reduce:active:scale-100"
+        >
+          <Link href="/login">Sign in</Link>
+        </Button>
+        <Button
+          asChild
+          size="sm"
+          className="h-9 cursor-pointer rounded-full px-4 text-xs font-semibold shadow-sm shadow-primary/15 transition-[transform,box-shadow,opacity] duration-200 ease-out hover:shadow-md active:scale-[0.98] motion-reduce:active:scale-100"
+        >
+          <Link href="/signup">Sign up</Link>
+        </Button>
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex h-dvh bg-slate-50 chat-page-container">
       {/* Mobile Header */}
-      <header className="fixed top-0 left-0 right-0 z-40 bg-white/90 backdrop-blur-md border-b border-slate-200/80 lg:hidden">
+      <header className="chat-chrome-header fixed top-0 left-0 right-0 z-40 border-b border-slate-200/60 bg-white/80 backdrop-blur-sm lg:hidden">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
             <Sheet open={sidebarOpen} onOpenChange={setSidebarOpen}>
@@ -631,56 +764,24 @@ export default function ChatPageClient({ conversationId }: { conversationId: str
               </SheetTrigger>
               <SheetContent side="left" className="w-80 p-5">
                 <SheetHeader className="mb-6">
-                  <SheetTitle className="flex items-center gap-2.5 text-lg">
-                    <Image src="/logo.svg" alt="AusLaw AI" width={72} height={72} />
-                    <span className="font-semibold">AusLaw AI</span>
+                  <SheetTitle asChild>
+                    <Link href="/" className="group aui-brand-home gap-2.5">
+                      <Image src="/logo.svg" alt="AusLaw AI" width={72} height={72} />
+                      <span className="aui-brand-home__label text-lg">AusLaw AI</span>
+                    </Link>
                   </SheetTitle>
                 </SheetHeader>
                 <SidebarContent />
               </SheetContent>
             </Sheet>
 
-            <div className="flex items-center gap-2">
+            <Link href="/" className="group aui-brand-home gap-2">
               <Image src="/logo.svg" alt="AusLaw AI" width={80} height={80} />
-              <span className="font-semibold text-slate-900">AusLaw AI</span>
-            </div>
+              <span className="aui-brand-home__label">AusLaw AI</span>
+            </Link>
           </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="cursor-pointer rounded-full h-9 w-9">
-                <Avatar className="h-8 w-8">
-                  <AvatarFallback className="bg-primary/10 text-primary text-xs font-medium">
-                    {getUserInitials()}
-                  </AvatarFallback>
-                </Avatar>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel className="font-normal">
-                <p className="text-sm font-medium">{user?.user_metadata?.full_name || "Account"}</p>
-                <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild className="cursor-pointer">
-                <Link href="/">
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  Home
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild className="cursor-pointer">
-                <Link href="/account">
-                  <Users className="mr-2 h-4 w-4" />
-                  Account
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-red-600 focus:text-red-600">
-                <LogOut className="mr-2 h-4 w-4" />
-                Log out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {authActions}
         </div>
       </header>
 
@@ -688,11 +789,9 @@ export default function ChatPageClient({ conversationId }: { conversationId: str
       <aside className="hidden lg:flex w-80 xl:w-[340px] flex-col border-r border-slate-200/80 bg-white">
         {/* Sidebar Header */}
         <div className="flex items-center justify-between p-5 border-b border-slate-100">
-          <Link href="/" className="flex items-center gap-2.5 group">
+          <Link href="/" className="group aui-brand-home gap-2.5">
             <Image src="/logo.svg" alt="AusLaw AI" width={80} height={80} />
-            <span className="text-xl font-semibold text-slate-900 tracking-tight">
-              AusLaw AI
-            </span>
+            <span className="aui-brand-home__label text-xl">AusLaw AI</span>
           </Link>
           <Link href="/">
             <Button
@@ -712,50 +811,16 @@ export default function ChatPageClient({ conversationId }: { conversationId: str
       </aside>
 
       {/* Main Chat Area */}
-      <main className="flex-1 flex flex-col min-w-0 bg-gradient-to-b from-slate-50 to-white relative">
+      <main className="relative flex min-w-0 flex-1 flex-col bg-transparent">
         {/* Chat Header */}
-        <div className="hidden lg:flex items-center justify-between px-6 py-3 border-b border-slate-200/60 bg-white/80 backdrop-blur-sm">
+        <div className="chat-chrome-header hidden items-center justify-between border-b border-slate-200/60 bg-white/80 px-6 py-3 backdrop-blur-sm lg:flex">
           <span className="text-sm font-medium text-slate-600">
             {mode === "analysis" ? "Case Analysis" : "Legal Chat"} · {currentConversationTitle}
             {legalTopic !== "general" && (
               <span className="text-slate-400"> — {legalTopic === "parking_ticket" ? "Parking Ticket" : "Insurance Claim"}</span>
             )}
           </span>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="cursor-pointer rounded-full h-9 w-9">
-                <Avatar className="h-8 w-8">
-                  <AvatarFallback className="bg-primary/10 text-primary text-xs font-medium">
-                    {getUserInitials()}
-                  </AvatarFallback>
-                </Avatar>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel className="font-normal">
-                <p className="text-sm font-medium">{user?.user_metadata?.full_name || "Account"}</p>
-                <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild className="cursor-pointer">
-                <Link href="/">
-                  <ArrowLeft className="mr-2 h-4 w-4" />
-                  Home
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuItem asChild className="cursor-pointer">
-                <Link href="/account">
-                  <Users className="mr-2 h-4 w-4" />
-                  Account
-                </Link>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={handleSignOut} className="cursor-pointer text-red-600 focus:text-red-600">
-                <LogOut className="mr-2 h-4 w-4" />
-                Log out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {authActions}
         </div>
 
         {/* Add top padding on mobile for fixed header */}
@@ -768,6 +833,7 @@ export default function ChatPageClient({ conversationId }: { conversationId: str
           {/* Chat area */}
           <CopilotChat
             className="flex-1 min-h-0"
+            AssistantMessage={ToggleFeedbackAssistantMessage}
             labels={{
               title: `${mode === "analysis" ? "Case Analysis" : "Legal Chat"}${legalTopic === "parking_ticket" ? " — Parking Ticket" : legalTopic === "insurance_claim" ? " — Insurance Claim" : ""}`,
               initial: getInitialMessage(),
@@ -779,12 +845,9 @@ export default function ChatPageClient({ conversationId }: { conversationId: str
           />
         </div>
 
-        {/* Quick Replies - positioned above input, outside overflow container */}
-        {quickReplies && quickReplies.length > 0 && (
-          <div className="quick-replies-container">
-            <QuickRepliesPanel replies={quickReplies} />
-          </div>
-        )}
+        {quickReplyHost && quickReplies && quickReplies.length > 0
+          ? createPortal(<QuickRepliesPanel replies={quickReplies} />, quickReplyHost)
+          : null}
       </main>
     </div>
   );
@@ -889,7 +952,7 @@ function WelcomeSection({ legalTopic, onTopicClick }: { legalTopic: LegalTopic; 
         <button
           key={topic.label}
           onClick={() => handleTopicClick(topic.prompt)}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-full border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 transition-all duration-200 cursor-pointer group"
+          className="group flex cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2.5 shadow-sm transition-[transform,box-shadow,background-color,border-color] duration-200 ease-out hover:border-slate-300 hover:bg-slate-50 hover:shadow active:scale-[0.98] motion-reduce:active:scale-100"
         >
           <topic.icon className="h-4 w-4 text-slate-400 group-hover:text-slate-600 transition-colors flex-shrink-0" />
           <span className="text-sm text-slate-600 group-hover:text-slate-900 transition-colors">
@@ -924,7 +987,7 @@ function QuickRepliesPanel({ replies }: { replies: string[] }) {
           key={index}
           variant="outline"
           size="sm"
-          className="text-sm text-slate-600 hover:text-slate-900 hover:bg-white hover:border-primary/30 border-slate-200 bg-white cursor-pointer transition-all rounded-full px-4"
+          className="h-9 cursor-pointer rounded-full border border-slate-200 bg-white px-4 text-sm text-slate-600 shadow-sm transition-[transform,box-shadow,background-color,border-color,color] duration-200 ease-out hover:border-primary/30 hover:bg-white hover:text-slate-900 hover:shadow active:scale-[0.98] motion-reduce:active:scale-100"
           onClick={() => handleQuickReply(reply)}
         >
           {reply}

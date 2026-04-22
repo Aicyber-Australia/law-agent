@@ -48,6 +48,13 @@
     --chart-5: 27 87% 67%;
 
     --radius: 0.625rem;
+
+    /* Motion — subtle product feel */
+    --aui-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    --aui-ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+    --aui-duration-fast: 160ms;
+    --aui-duration: 240ms;
+    --aui-duration-slow: 400ms;
   }
 
   .dark {
@@ -83,6 +90,80 @@
 
   body {
     @apply bg-background text-foreground antialiased;
+  }
+}
+
+@layer components {
+  /**
+   * Brand / home entry: one link for logo + title, clear hover & active feedback.
+   * Optional .aui-brand-home__mark wraps the logo (landing nav); otherwise the <img> lifts subtly.
+   */
+  .aui-brand-home {
+    @apply inline-flex cursor-pointer items-center gap-2.5 rounded-xl border border-transparent
+      bg-transparent text-inherit no-underline outline-none
+      transition-[background-color,border-color,box-shadow,transform,opacity] duration-300 ease-out
+      motion-reduce:transition-colors;
+  }
+
+  .aui-brand-home:hover,
+  .aui-brand-home:focus-visible {
+    @apply border-slate-200/80 bg-slate-50/70 shadow-sm;
+  }
+
+  .aui-brand-home:active {
+    @apply scale-[0.99] motion-reduce:scale-100;
+  }
+
+  .aui-brand-home:focus-visible {
+    @apply ring-2 ring-sky-500/35 ring-offset-2 ring-offset-background;
+  }
+
+  .aui-brand-home__mark {
+    @apply relative shrink-0 rounded-2xl border border-slate-200/90 bg-slate-100/90 p-1.5 shadow-sm
+      transition-[transform,box-shadow,border-color] duration-300 ease-out
+      motion-reduce:transition-colors;
+  }
+
+  .aui-brand-home:hover .aui-brand-home__mark,
+  .aui-brand-home:focus-visible .aui-brand-home__mark {
+    @apply -translate-y-px border-slate-300/90 shadow-md motion-reduce:translate-y-0;
+  }
+
+  .aui-brand-home:not(:has(.aui-brand-home__mark)):hover img,
+  .aui-brand-home:not(:has(.aui-brand-home__mark)):focus-visible img {
+    @apply -translate-y-px shadow-md ring-1 ring-slate-200/50 motion-reduce:translate-y-0 motion-reduce:shadow-none motion-reduce:ring-0;
+    transition: transform 300ms var(--aui-ease-out), box-shadow 300ms var(--aui-ease-out),
+      opacity 300ms var(--aui-ease-out);
+  }
+
+  .aui-brand-home__label {
+    @apply font-semibold text-slate-900 tracking-tight transition-[color,opacity] duration-300 ease-out;
+  }
+
+  .aui-brand-home:hover .aui-brand-home__label,
+  .aui-brand-home:focus-visible .aui-brand-home__label {
+    @apply text-slate-950 opacity-95;
+  }
+}
+
+/* Opacity-only: do not animate transform on this wrapper — any non-none transform
+   on an ancestor creates a new containing block and breaks position:fixed navbars. */
+@keyframes aui-page-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.aui-page-enter {
+  animation: aui-page-enter var(--aui-duration-slow) var(--aui-ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .aui-page-enter {
+    animation: none;
   }
 }
 
@@ -145,6 +226,17 @@
   max-width: 85% !important;
   margin-bottom: 1rem !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+  transition:
+    box-shadow var(--aui-duration) var(--aui-ease-out),
+    transform var(--aui-duration) var(--aui-ease-out),
+    border-color var(--aui-duration) var(--aui-ease-out) !important;
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .copilotKitMessage:hover {
+    box-shadow: 0 6px 20px rgba(15, 23, 42, 0.08) !important;
+    transform: translateY(-1px);
+  }
 }
 
 /* User messages - Right aligned */
@@ -222,6 +314,20 @@
   position: relative !important;
 }
 
+/*
+ * CopilotKit assistant controls use position:absolute so they do not affect
+ * message height; with our padded bubble that makes the row overlap the text.
+ * Keep them in normal flow so the bubble grows and actions sit below content.
+ */
+.copilotKitMessage.copilotKitAssistantMessage .copilotKitMessageControls {
+  position: static !important;
+  left: auto !important;
+  margin-top: 0.625rem !important;
+  padding: 0.5rem 0 0 0 !important;
+  border-top: 1px solid rgba(0, 0, 0, 0.06) !important;
+  gap: 0.75rem !important;
+}
+
 /* Action buttons container - position inside bubble */
 [class*="ResponseActions"],
 [class*="messageActions"],
@@ -261,42 +367,58 @@
   height: 1rem !important;
 }
 
+.copilotKitMessageControlButton {
+  transition:
+    color var(--aui-duration-fast) var(--aui-ease-out),
+    background-color var(--aui-duration-fast) var(--aui-ease-out),
+    transform var(--aui-duration-fast) var(--aui-ease-out) !important;
+}
+
+.copilotKitMessageControlButton:hover {
+  transform: scale(1.06) !important;
+}
+
+.copilotKitMessageControlButton:active {
+  transform: scale(0.94) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copilotKitMessageControlButton:hover,
+  .copilotKitMessageControlButton:active {
+    transform: none !important;
+  }
+}
+
 /* ============================================
-   Quick Replies Panel - Above Input
+   Quick Replies - portal slot above CopilotKit input
    ============================================ */
 
-.quick-replies-container {
-  position: absolute;
-  bottom: 150px;
-  left: 0;
-  right: 0;
-  z-index: 50;
-  pointer-events: none;
+.chat-page-container .quick-replies-slot {
+  flex-shrink: 0;
+  width: 100%;
+  padding: 0.5rem 1rem 0.75rem;
+  background: #ffffff;
+  border-bottom: 1px solid #e2e8f0;
+  box-sizing: border-box;
 }
 
 .quick-replies-panel {
   max-width: 56rem;
   margin: 0 auto;
   width: 100%;
-  padding: 0.5rem 1rem;
-  pointer-events: auto;
+  padding: 0;
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
   justify-content: center;
+  row-gap: 0.5rem;
 }
 
 .quick-replies-panel > span {
   flex-shrink: 0;
   width: auto;
   margin-bottom: 0;
-}
-
-@media (max-width: 768px) {
-  .quick-replies-container {
-    bottom: 80px;
-  }
 }
 
 /* ============================================
@@ -314,6 +436,13 @@
   margin: 0 auto !important;
 }
 
+/* Chat composer footer branding: keep visible, do not navigate */
+.chat-page-container .copilotKitInputContainer a {
+  pointer-events: none !important;
+  cursor: default !important;
+  text-decoration: none !important;
+}
+
 .copilotKitTextarea,
 .copilotKitInput textarea {
   border: 1px solid #e2e8f0 !important;
@@ -322,7 +451,10 @@
   padding: 0.875rem 1rem !important;
   font-size: 0.9375rem !important;
   min-height: 52px !important;
-  transition: all 0.2s ease !important;
+  transition:
+    border-color var(--aui-duration-fast) var(--aui-ease-out),
+    box-shadow var(--aui-duration) var(--aui-ease-out),
+    background-color var(--aui-duration-fast) var(--aui-ease-out) !important;
   resize: none !important;
 }
 
@@ -340,18 +472,36 @@
   background: #2563eb !important;
   color: #ffffff !important;
   border-radius: 0.75rem !important;
-  transition: all 0.2s ease !important;
+  transition:
+    background-color var(--aui-duration-fast) var(--aui-ease-out),
+    transform var(--aui-duration-fast) var(--aui-ease-out),
+    box-shadow var(--aui-duration-fast) var(--aui-ease-out),
+    opacity var(--aui-duration-fast) var(--aui-ease-out) !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06) !important;
 }
 
 .copilotKitSendButton:hover,
 .copilotKitInput button[type="submit"]:hover {
   background: #1d4ed8 !important;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35) !important;
+}
+
+.copilotKitSendButton:active:not(:disabled),
+.copilotKitInput button[type="submit"]:active:not(:disabled) {
+  transform: scale(0.97) !important;
 }
 
 .copilotKitSendButton:disabled,
 .copilotKitInput button[type="submit"]:disabled {
   opacity: 0.5 !important;
   cursor: not-allowed !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .copilotKitSendButton:active:not(:disabled),
+  .copilotKitInput button[type="submit"]:active:not(:disabled) {
+    transform: none !important;
+  }
 }
 
 /* ============================================
@@ -518,6 +668,21 @@
   border-right-color: #e0f2fe !important;
 }
 
+.chat-page-container aside {
+  transition:
+    background-color var(--aui-duration) var(--aui-ease-out),
+    border-color var(--aui-duration) var(--aui-ease-out),
+    box-shadow var(--aui-duration) var(--aui-ease-out);
+}
+
+/* Chat shell headers (mobile fixed bar + desktop title strip): shared motion tokens */
+.chat-page-container .chat-chrome-header {
+  transition:
+    background-color var(--aui-duration) var(--aui-ease-out),
+    border-color var(--aui-duration) var(--aui-ease-out),
+    box-shadow var(--aui-duration) var(--aui-ease-out);
+}
+
 /* ============================================
    ANALYSIS MODE - Professional & Serious
    Navy tones, authoritative feel
@@ -612,4 +777,23 @@
 
 [data-mode="analysis"] .shadow-primary\/20 {
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2) !important;
+}
+
+/* ============================================
+   CopilotKit dev-only overlays (hide, keep chat UI)
+   - usage-banner: @copilotkit/react-core/src/components/usage-banner.tsx (.usage-banner)
+   - ToastProvider bottom banner: toast-provider.tsx (inline fixed div, z-index 9999)
+   - Inspector trigger: dev-console/console-trigger.tsx (fixed button, max z-index)
+   ============================================ */
+
+.usage-banner {
+  display: none !important;
+}
+
+div[style*="bottom: 20px"][style*="left: 50%"][style*="z-index: 9999"] {
+  display: none !important;
+}
+
+button[style*="2147483647"] {
+  display: none !important;
 }

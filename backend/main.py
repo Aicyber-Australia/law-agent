@@ -126,7 +126,10 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
 # Combined auth + rate limiting middleware for /copilotkit endpoint
 class CopilotKitMiddleware(BaseHTTPMiddleware):
-    """Apply auth validation and distributed rate limiting to /copilotkit."""
+    """Rate-limit /copilotkit; allow anonymous chat (no JWT required).
+
+    Authenticated callers are keyed by Supabase user id; guests by client IP.
+    """
 
     RATE_LIMIT = 30  # requests per minute
     WINDOW = 60  # seconds
@@ -134,17 +137,25 @@ class CopilotKitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         # Only apply to /copilotkit POST requests
         if request.url.path == "/copilotkit" and request.method == "POST":
-            # Auth check: validate Bearer token
             user = await get_optional_user(request)
-            if not user:
-                return Response(
-                    content='{"detail": "Authentication required"}',
-                    status_code=401,
-                    media_type="application/json",
-                )
+            # Minimal guest contract for downstream / observability (not a DB user)
+            if user:
+                request.state.copilotkit_user = {**user, "is_guest": False}
+            else:
+                request.state.copilotkit_user = {
+                    "user_id": None,
+                    "email": None,
+                    "is_guest": True,
+                }
 
-            client_host = request.client.host if request.client else "unknown"
-            user_identifier = user.get("user_id") or client_host
+            forwarded = request.headers.get("x-forwarded-for")
+            client_ip = (
+                forwarded.split(",")[0].strip()
+                if forwarded
+                else (request.client.host if request.client else "unknown")
+            )
+            uid = user.get("user_id") if user else None
+            user_identifier = uid if uid else f"guest:{client_ip}"
             allowed = rate_limiter.allow(
                 scope="copilotkit",
                 identifier=user_identifier,
